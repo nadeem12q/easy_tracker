@@ -94,5 +94,8 @@ npm run mcp
 - `weekly_summary`
 - `habit_consistency_report`
 - `reflection_pattern_report`
+- `missed_habits_report`
+- `top_struggles_report`
+- `recommended_focus_for_tomorrow`
 
 Yeh structure is liye rakha gaya hai taake user kisi bhi LLM ya agent ko MCP attach karke tracker ko natural language mein update karwa sake.
