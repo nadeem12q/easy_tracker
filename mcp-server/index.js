@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? "";
 const MCP_GATEWAY_URL =
-  process.env.MCP_GATEWAY_URL ?? (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/mcp-gateway` : "");
+  process.env.MCP_GATEWAY_URL ?? (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/mcp-gateway-secure` : "");
 
 let authContext = null;
 
@@ -74,6 +74,7 @@ async function authenticateWithToken(argumentsObject) {
   return {
     connected: true,
     client_name: authContext.client_name,
+    secure_gateway: MCP_GATEWAY_URL.includes("mcp-gateway-secure"),
     ...who
   };
 }
@@ -87,6 +88,7 @@ function whoAmI() {
   requireContext();
   return {
     client_name: authContext.client_name,
+    secure_gateway: MCP_GATEWAY_URL.includes("mcp-gateway-secure"),
     ...(authContext.user ?? {})
   };
 }
@@ -354,7 +356,7 @@ lineReader.on("line", async (line) => {
         protocolVersion: "2024-11-05",
         serverInfo: {
           name: "metrack-mcp",
-          version: "0.2.0"
+          version: "0.3.0"
         },
         capabilities: {
           tools: {}
