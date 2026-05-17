@@ -11,6 +11,8 @@ const webReminderTimers = new Map();
 let pluginPromise = null;
 let actionListenerBound = false;
 
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 async function getLocalNotifications() {
   if (!pluginPromise) {
     pluginPromise = import("@capacitor/local-notifications")
@@ -21,6 +23,16 @@ async function getLocalNotifications() {
   return pluginPromise;
 }
 
+function normalizeRepeatDays(days) {
+  if (!Array.isArray(days) || !days.length) return [0, 1, 2, 3, 4, 5, 6];
+  const normalized = [...new Set(days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+  return normalized.length ? normalized : [0, 1, 2, 3, 4, 5, 6];
+}
+
+function shouldRunOnDate(habit, date = new Date()) {
+  return normalizeRepeatDays(habit.reminder_repeat_days).includes(date.getDay());
+}
+
 function buildReminderBody(habit) {
   if (habit.reminder_message?.trim()) {
     return habit.reminder_message.trim();
@@ -29,8 +41,8 @@ function buildReminderBody(habit) {
   return `Kya aap ne ${habit.name} complete kar li hai?`;
 }
 
-function getReminderId(habitId) {
-  return hashToInt(`habit-reminder:${habitId}`);
+function getReminderId(habitId, dayIndex = 0) {
+  return hashToInt(`habit-reminder:${habitId}:${dayIndex}`);
 }
 
 function getLaterReminderId(habitId, dateText) {
@@ -45,7 +57,11 @@ function clearWebReminder(habitId) {
   }
 }
 
-function getNextReminderDate(timeText, offsetMinutes = 0) {
+function getNextReminderDate(timeText, repeatDays = [0, 1, 2, 3, 4, 5, 6], offsetMinutes = 0) {
+  if (offsetMinutes > 0) {
+    return new Date(Date.now() + offsetMinutes * 60 * 1000);
+  }
+
   const [hourText, minuteText] = String(timeText || "").split(":");
   const hour = Number(hourText);
   const minute = Number(minuteText);
@@ -54,19 +70,19 @@ function getNextReminderDate(timeText, offsetMinutes = 0) {
     return null;
   }
 
+  const selectedDays = normalizeRepeatDays(repeatDays);
   const now = new Date();
-  const next = new Date();
-  next.setHours(hour, minute, 0, 0);
 
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const next = new Date();
+    next.setDate(now.getDate() + offset);
+    next.setHours(hour, minute, 0, 0);
+
+    if (next.getTime() <= now.getTime()) continue;
+    if (selectedDays.includes(next.getDay())) return next;
   }
 
-  if (offsetMinutes > 0) {
-    next.setTime(Date.now() + offsetMinutes * 60 * 1000);
-  }
-
-  return next;
+  return null;
 }
 
 async function ensureNativeNotificationsReady() {
@@ -119,14 +135,14 @@ function scheduleWebReminder(habit, onNotify) {
     return;
   }
 
-  const next = getNextReminderDate(habit.reminder_time);
+  const next = getNextReminderDate(habit.reminder_time, habit.reminder_repeat_days);
   if (!next) {
     return;
   }
 
   const delay = Math.max(next.getTime() - Date.now(), 1000);
   const timerId = window.setTimeout(() => {
-    if ("Notification" in window && Notification.permission === "granted") {
+    if (shouldRunOnDate(habit) && "Notification" in window && Notification.permission === "granted") {
       new Notification(`Reminder: ${habit.name}`, {
         body: `${buildReminderBody(habit)} Android app par Yes / No / Later actions available hain.`
       });
@@ -136,7 +152,9 @@ function scheduleWebReminder(habit, onNotify) {
       onNotify({
         kind: "web-reminder-fired",
         habitId: habit.id,
-        habitName: habit.name
+        habitName: habit.name,
+        entryDate: formatDateInput(),
+        scheduledFor: next.toISOString()
       });
     }
 
@@ -173,7 +191,7 @@ export async function syncHabitReminderNotifications(habits, options = {}) {
     }
 
     const idsToClear = habits.flatMap((habit) => [
-      { id: getReminderId(habit.id) },
+      ...normalizeRepeatDays(habit.reminder_repeat_days).map((day) => ({ id: getReminderId(habit.id, day) })),
       { id: getLaterReminderId(habit.id, formatDateInput()) }
     ]);
 
@@ -188,30 +206,42 @@ export async function syncHabitReminderNotifications(habits, options = {}) {
       return ready;
     }
 
-    await LocalNotifications.schedule({
-      notifications: activeHabits.map((habit) => {
-        const [hourText, minuteText] = String(habit.reminder_time).split(":");
-        return {
-          id: getReminderId(habit.id),
-          title: `Reminder: ${habit.name}`,
-          body: buildReminderBody(habit),
-          actionTypeId: ACTION_TYPE_ID,
-          channelId: REMINDER_CHANNEL_ID,
-          schedule: {
-            on: {
-              hour: Number(hourText),
-              minute: Number(minuteText)
-            },
-            allowWhileIdle: true
+    const notifications = activeHabits.flatMap((habit) => {
+      const [hourText, minuteText] = String(habit.reminder_time).split(":");
+      return normalizeRepeatDays(habit.reminder_repeat_days).map((day) => ({
+        id: getReminderId(habit.id, day),
+        title: `Reminder: ${habit.name}`,
+        body: buildReminderBody(habit),
+        actionTypeId: ACTION_TYPE_ID,
+        channelId: REMINDER_CHANNEL_ID,
+        schedule: {
+          on: {
+            weekday: day + 1,
+            hour: Number(hourText),
+            minute: Number(minuteText)
           },
-          extra: {
-            kind: "habit-reminder",
-            habitId: habit.id,
-            habitName: habit.name,
-            snoozeMinutes: Number(habit.reminder_snooze_minutes || 30)
-          }
-        };
-      })
+          allowWhileIdle: true
+        },
+        extra: {
+          kind: "habit-reminder",
+          habitId: habit.id,
+          habitName: habit.name,
+          repeatDay: day,
+          snoozeMinutes: Number(habit.reminder_snooze_minutes || 30)
+        }
+      }));
+    });
+
+    await LocalNotifications.schedule({ notifications });
+
+    options.onScheduled?.({
+      kind: "native-reminders-scheduled",
+      count: notifications.length,
+      habits: activeHabits.map((habit) => ({
+        habitId: habit.id,
+        habitName: habit.name,
+        repeatDays: normalizeRepeatDays(habit.reminder_repeat_days)
+      }))
     });
 
     return { available: true, permission: ready.permission };
@@ -273,7 +303,7 @@ export async function clearHabitReminderNotifications(habitId) {
 
   await LocalNotifications.cancel({
     notifications: [
-      { id: getReminderId(habitId) },
+      ...[0, 1, 2, 3, 4, 5, 6].map((day) => ({ id: getReminderId(habitId, day) })),
       { id: getLaterReminderId(habitId, formatDateInput()) }
     ]
   }).catch(() => {});
@@ -301,9 +331,12 @@ export async function registerReminderActionListener(onAction) {
       actionId: event.actionId,
       habitId: extra.habitId,
       habitName: extra.habitName,
+      repeatDay: extra.repeatDay,
       snoozeMinutes: Number(extra.snoozeMinutes || 30),
       entryDate: formatDateInput(),
-      source: extra.kind
+      source: extra.kind,
+      scheduledFor: event.notification.schedule?.at?.toISOString?.() ?? null,
+      notificationId: String(event.notification.id ?? "")
     });
   });
 
@@ -315,7 +348,9 @@ export function describeReminder(habit) {
     return "Reminder off";
   }
 
-  return `Daily at ${formatTimeLabel(habit.reminder_time)}`;
+  const repeatDays = normalizeRepeatDays(habit.reminder_repeat_days);
+  const dayLabel = repeatDays.length === 7 ? "Every day" : repeatDays.map((day) => DAY_LABELS[day]).join(", ");
+  return `${dayLabel} at ${formatTimeLabel(habit.reminder_time)}`;
 }
 
 export const reminderActionIds = {
