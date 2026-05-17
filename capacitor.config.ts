@@ -1,3 +1,5 @@
+/// <reference types="@capacitor/local-notifications" />
+
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
@@ -26,6 +28,9 @@ const config: CapacitorConfig = {
     },
     Keyboard: {
       resize: "body"
+    },
+    LocalNotifications: {
+      iconColor: "#2f251d"
     }
   }
 };
