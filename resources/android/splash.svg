@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920">
+  <rect width="1080" height="1920" fill="#f8f3e8"/>
+  <rect x="230" y="640" width="620" height="620" rx="118" fill="#fffaf1" stroke="#d8ccb4" stroke-width="20"/>
+  <path d="M330 880h230" stroke="#83664d" stroke-width="34" stroke-linecap="round"/>
+  <path d="M330 1000h320" stroke="#83664d" stroke-width="34" stroke-linecap="round"/>
+  <path d="M330 1120h180" stroke="#83664d" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="700" cy="880" r="56" fill="#d7efc7" stroke="#83664d" stroke-width="20"/>
+  <circle cx="700" cy="1000" r="56" fill="#dcd5e9" stroke="#83664d" stroke-width="20"/>
+  <circle cx="700" cy="1120" r="56" fill="#f5c3b9" stroke="#83664d" stroke-width="20"/>
+  <text x="540" y="1390" text-anchor="middle" font-size="92" font-family="Georgia, serif" fill="#83664d">MeTrack</text>
+</svg>
