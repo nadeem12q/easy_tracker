@@ -16,15 +16,15 @@ Aur agent woh sab MeTrack account mein direct save kar sake.
 
 ### Authentication model
 
-- Agent pehle `sign_in(email, password)` tool use kare.
-- Server Supabase Auth se user session hasil kare.
-- Us session ke bearer token ke saath saari CRUD operations kare.
-- Is approach ka faida ye hai ke service-role secret agent ko dena nahin padta.
+- Agent ko password dene ke bajaye user app se generated MCP token diya jaye.
+- MCP server token ko secure gateway ke through verify kare.
+- Gateway Supabase Edge Function ho jo service-role context mein operate kare, lekin har action user-scoped validation ke saath kare.
+- Har request audit trail mein log ho.
 
 ### Core tool groups
 
 1. Session tools
-   - `sign_in`
+   - `authenticate_with_token`
    - `sign_out`
    - `who_am_i`
 2. Daily tracker tools
@@ -56,10 +56,10 @@ Aur agent woh sab MeTrack account mein direct save kar sake.
 
 ## Next recommended upgrade
 
-Production phase mein `sign_in(email,password)` ke ilawa ye do cheezen useful hongi:
+Production phase mein in do cheezon ki aur value hogi:
 
-1. App-generated personal access tokens
-2. Dedicated edge functions for summary + analysis endpoints
+1. Token scopes ko aur granular banana
+2. Dedicated rate limit / abuse controls
 
 ## Current advanced layer
 
@@ -70,3 +70,4 @@ Ab server sirf CRUD tak limited nahin raha. Is mein yeh advanced use cases cover
 - Weak ya tootne wali habits `streak_risk_report` se identify ho jati hain
 - Current vs previous period progress `momentum_report` se compare hoti hai
 - `coaching_brief` habits, reflections aur trend ko combine karke human-readable short guidance deta hai
+- Aur ab external access password-based nahin balki token-based secure flow par shift ho gaya hai
