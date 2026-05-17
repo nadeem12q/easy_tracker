@@ -55,7 +55,11 @@ function buildDefaultHabits() {
     category: habit.category,
     is_binary: true,
     position: habit.position ?? index,
-    is_archived: false
+    is_archived: false,
+    reminder_enabled: false,
+    reminder_time: "",
+    reminder_message: "",
+    reminder_snooze_minutes: 30
   }));
 }
 
@@ -277,7 +281,11 @@ export async function createHabit(name) {
       category: "custom",
       is_binary: true,
       position: state.habits.length,
-      is_archived: false
+      is_archived: false,
+      reminder_enabled: false,
+      reminder_time: "",
+      reminder_message: "",
+      reminder_snooze_minutes: 30
     };
     state.habits.push(habit);
     setLocalState(state);
@@ -294,7 +302,11 @@ export async function createHabit(name) {
       color: "var(--mint)",
       category: "custom",
       is_binary: true,
-      position: habits.length
+      position: habits.length,
+      reminder_enabled: false,
+      reminder_time: null,
+      reminder_message: "",
+      reminder_snooze_minutes: 30
     })
     .select("*")
     .single();
@@ -515,4 +527,73 @@ export async function revokeMcpToken(tokenId) {
   if (error) {
     throw error;
   }
+}
+
+export async function updateHabitReminder(habitId, patch) {
+  const normalized = {
+    reminder_enabled: Boolean(patch.reminder_enabled),
+    reminder_time: patch.reminder_enabled ? patch.reminder_time || null : null,
+    reminder_message: patch.reminder_message ?? "",
+    reminder_snooze_minutes: Number(patch.reminder_snooze_minutes ?? 30)
+  };
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const state = getLocalState();
+    state.habits = state.habits.map((habit) =>
+      habit.id === habitId
+        ? {
+            ...habit,
+            ...normalized,
+            reminder_time: normalized.reminder_time ?? "",
+            reminder_message: normalized.reminder_message
+          }
+        : habit
+    );
+    setLocalState(state);
+    return state.habits.find((habit) => habit.id === habitId) ?? null;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from("user_habits")
+    .update(normalized)
+    .eq("id", habitId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function setHabitStatus(date, habitId, done) {
+  const state = await getDailyState(date);
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const local = getLocalState();
+    if (!local.habitLogs[date]) {
+      local.habitLogs[date] = {};
+    }
+    local.habitLogs[date][habitId] = Boolean(done);
+    setLocalState(local);
+    return Boolean(done);
+  }
+
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.from("daily_habit_logs").upsert(
+    {
+      entry_id: state.entry.id,
+      habit_id: habitId,
+      done: Boolean(done)
+    },
+    { onConflict: "entry_id,habit_id" }
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(done);
 }
