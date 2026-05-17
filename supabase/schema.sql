@@ -70,6 +70,34 @@ create table if not exists public.mcp_sessions (
   created_at timestamptz not null default now()
 );
 
+create or replace function public.seed_default_habits(target_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.user_habits (user_id, name, slug, color, category, is_binary, position)
+  values
+    (target_user_id, '3 Meals', '3-meals', 'var(--lavender)', 'nutrition', true, 0),
+    (target_user_id, 'Workout', 'workout', 'var(--lavender)', 'health', true, 1),
+    (target_user_id, 'Read', 'read', 'var(--sand)', 'learning', true, 2),
+    (target_user_id, 'Fajar', 'fajar', 'var(--sand)', 'spiritual', true, 3),
+    (target_user_id, 'Zohar', 'zohar', 'var(--rose)', 'spiritual', true, 4),
+    (target_user_id, 'Asar', 'asar', 'var(--rose)', 'spiritual', true, 5),
+    (target_user_id, 'Magrib', 'magrib', 'var(--violet)', 'spiritual', true, 6),
+    (target_user_id, 'Isha', 'isha', 'var(--violet)', 'spiritual', true, 7),
+    (target_user_id, 'Quran', 'quran', 'var(--taupe)', 'spiritual', true, 8),
+    (target_user_id, 'Dua T&A', 'dua-t-a', 'var(--taupe)', 'spiritual', true, 9),
+    (target_user_id, 'Less Talk', 'less-talk', 'var(--mint)', 'character', true, 10),
+    (target_user_id, 'Kind Response', 'kind-response', 'var(--mint)', 'character', true, 11),
+    (target_user_id, 'Control Anger', 'control-anger', 'var(--lilac)', 'character', true, 12),
+    (target_user_id, 'Silent Sitting', 'silent-sitting', 'var(--lilac)', 'mindfulness', true, 13),
+    (target_user_id, 'Journalizing', 'journalizing', 'var(--peach)', 'reflection', true, 14)
+  on conflict (user_id, slug) do nothing;
+end;
+$$;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -80,9 +108,14 @@ begin
   insert into public.profiles (id)
   values (new.id)
   on conflict (id) do nothing;
+
+  perform public.seed_default_habits(new.id);
   return new;
 end;
 $$;
+
+select public.seed_default_habits(id)
+from auth.users;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -277,3 +310,4 @@ grant select, insert, update, delete on public.mcp_sessions to authenticated;
 
 revoke all on function public.handle_new_user() from anon, authenticated, public;
 revoke all on function public.set_updated_at() from anon, authenticated, public;
+revoke all on function public.seed_default_habits(uuid) from anon, authenticated, public;
