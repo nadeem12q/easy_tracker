@@ -1,6 +1,0 @@
-{
-  "appId": "com.metrack.habitbuilder",
-  "appName": "MeTrack: Habit Builder",
-  "webDir": "dist",
-  "bundledWebRuntime": false
-}
