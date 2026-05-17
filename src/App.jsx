@@ -83,6 +83,9 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ email: "", password: "" });
   const [newHabit, setNewHabit] = useState("");
   const [feedback, setFeedback] = useState(null);
+  const [showWelcome, setShowWelcome] = useState(() => {
+    return window.localStorage.getItem("metrack-welcome-dismissed") !== "yes";
+  });
 
   const weekday = useMemo(() => weekdayFromDate(date), [date]);
   const sleepDuration = useMemo(
@@ -206,6 +209,13 @@ export default function App() {
     await load(date);
   }
 
+  function dismissWelcome(mode = "preview") {
+    if (mode === "preview") {
+      window.localStorage.setItem("metrack-welcome-dismissed", "yes");
+    }
+    setShowWelcome(false);
+  }
+
   if (loading || !entry) {
     return (
       <main className="app-shell">
@@ -228,11 +238,19 @@ export default function App() {
 
           <div className="toolbar">
             <span className="pill">{hasSupabaseConfig ? "Supabase Connected" : "Env Pending"}</span>
+            <span className="pill">{session?.user ? "Account Mode" : "Preview Mode"}</span>
             <span className="pill">
               {sleepDuration ? `Sleep: ${sleepDuration}` : "Sleep duration auto-calc ready"}
             </span>
             <span className="pill">{saving ? "Saving..." : "Auto-save available"}</span>
           </div>
+
+          {!session?.user ? (
+            <div className="guest-note">
+              <strong>Preview mode:</strong> app khul jati hai, lekin permanent sync aur MCP-based
+              account automation ke liye login ya signup zaroori hai.
+            </div>
+          ) : null}
         </div>
 
         <aside className="hero-panel">
@@ -258,6 +276,9 @@ export default function App() {
               <div className="section-divider" />
               <span className="field-label">Signed In</span>
               <div className="subtle-note">{session.user.email || "Active user"}</div>
+              <div className="subtle-note">
+                Aap ka data ab aap ke account ke saath Supabase par sync ho raha hai.
+              </div>
               <div className="toolbar">
                 <button type="button" className="action secondary" onClick={handleLogout}>
                   Logout
@@ -283,6 +304,12 @@ export default function App() {
                 >
                   Create Account
                 </button>
+              </div>
+
+              <div className="auth-note">
+                Account banane ke baad aap ka tracker, reflections, aur habits aap ke personal
+                account mein save ho jayengi. Phir MCP server bhi isi account data ko use kar sake
+                ga.
               </div>
 
               <Field label="Email">
@@ -319,6 +346,57 @@ export default function App() {
         <div className={cx("alert", feedback.type === "error" ? "error" : "success")}>
           {feedback.message}
         </div>
+      ) : null}
+
+      {showWelcome && !session?.user ? (
+        <section className="welcome-panel">
+          <div className="welcome-copy">
+            <p className="eyebrow">Start Here</p>
+            <h2 className="welcome-title">MeTrack ko do tareeqon se use kar sakte hain</h2>
+            <p className="welcome-text">
+              Preview mode mein app dekh sakte hain. Account mode mein aap ka data save hota hai,
+              default habits milti hain, aur MCP/LLM automation bhi aap ke account ke saath kaam
+              karti hai.
+            </p>
+            <div className="welcome-points">
+              <div className="welcome-point">
+                <strong>Preview:</strong> bina account app ka feel samajh lo.
+              </div>
+              <div className="welcome-point">
+                <strong>Account:</strong> personal sync, backend save, aur future cross-device use.
+              </div>
+              <div className="welcome-point">
+                <strong>MCP ready:</strong> agent ko bol kar tracker fill aur analyze karwa sakte ho.
+              </div>
+            </div>
+          </div>
+
+          <div className="welcome-actions">
+            <button
+              type="button"
+              className="action"
+              onClick={() => {
+                setAuthMode("signup");
+                dismissWelcome("account");
+              }}
+            >
+              Account Create Karain
+            </button>
+            <button
+              type="button"
+              className="action secondary"
+              onClick={() => {
+                setAuthMode("signin");
+                dismissWelcome("account");
+              }}
+            >
+              Mere Pas Account Hai
+            </button>
+            <button type="button" className="text-action" onClick={() => dismissWelcome("preview")}>
+              Pehle preview dekh leta hoon
+            </button>
+          </div>
+        </section>
       ) : null}
 
       <section className="page-grid">
