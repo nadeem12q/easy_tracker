@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   archiveHabit,
   createMcpToken,
@@ -9,14 +9,25 @@ import {
   listMcpTokens,
   revokeMcpToken,
   saveEntryFields,
+  setHabitStatus,
   signIn,
   signOut,
   signUp,
   subscribeToAuthChanges,
-  toggleHabit
+  toggleHabit,
+  updateHabitReminder
 } from "./api.js";
 import { DAY_RATING_STARS, MOOD_OPTIONS, QUALITY_STARS, WEEKDAY_LABELS } from "./defaults.js";
 import { calculateSleepDuration, formatDateInput, weekdayFromDate } from "./lib.js";
+import {
+  clearHabitReminderNotifications,
+  describeReminder,
+  ensureReminderPermissions,
+  registerReminderActionListener,
+  reminderActionIds,
+  scheduleLaterReminder,
+  syncHabitReminderNotifications
+} from "./notifications.js";
 import { hasSupabaseConfig } from "./supabase.js";
 
 function cx(...parts) {
@@ -74,6 +85,92 @@ function MoodSelector({ value, onPick }) {
   );
 }
 
+function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Reminder</p>
+            <h3 className="modal-title">{value.name}</h3>
+          </div>
+          <button type="button" className="action secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <label className="switch-row">
+          <input
+            type="checkbox"
+            checked={value.reminder_enabled}
+            onChange={(event) =>
+              onChange((current) => ({ ...current, reminder_enabled: event.target.checked }))
+            }
+          />
+          <div>
+            <strong>Daily reminder enable karein</strong>
+            <div className="subtle-note">Default off hai. User khud on karega.</div>
+          </div>
+        </label>
+
+        <div className="panel-row">
+          <Field label="Reminder Time">
+            <input
+              type="time"
+              disabled={!value.reminder_enabled}
+              value={value.reminder_time}
+              onChange={(event) =>
+                onChange((current) => ({ ...current, reminder_time: event.target.value }))
+              }
+            />
+          </Field>
+
+          <Field label="Later Minutes">
+            <input
+              type="number"
+              min="5"
+              max="240"
+              disabled={!value.reminder_enabled}
+              value={value.reminder_snooze_minutes}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  reminder_snooze_minutes: event.target.value
+                }))
+              }
+            />
+          </Field>
+        </div>
+
+        <Field label="Custom Reminder Text">
+          <textarea
+            disabled={!value.reminder_enabled}
+            value={value.reminder_message}
+            placeholder="Misal: Fajar ka waqt ho gaya. Kya aap ne ye habit kar li hai?"
+            onChange={(event) =>
+              onChange((current) => ({ ...current, reminder_message: event.target.value }))
+            }
+          />
+        </Field>
+
+        <div className="auth-note">
+          Notification mein teen actions honge: <strong>Yes</strong>, <strong>No</strong>, aur{" "}
+          <strong>Later</strong>. Android app mein yeh zyada strong tareeqay se kaam karega.
+        </div>
+
+        <div className="toolbar">
+          <button type="button" className="action" onClick={onSave} disabled={busy}>
+            {busy ? "Saving..." : "Save Reminder"}
+          </button>
+          <button type="button" className="action secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [date, setDate] = useState(formatDateInput());
@@ -90,9 +187,13 @@ export default function App() {
   const [tokenLabel, setTokenLabel] = useState("Primary Agent");
   const [createdToken, setCreatedToken] = useState("");
   const [tokenBusy, setTokenBusy] = useState(false);
+  const [reminderEditor, setReminderEditor] = useState(null);
+  const [reminderBusy, setReminderBusy] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => {
     return window.localStorage.getItem("metrack-welcome-dismissed") !== "yes";
   });
+  const longPressTimerRef = useRef(null);
+  const longPressLockRef = useRef("");
 
   const weekday = useMemo(() => weekdayFromDate(date), [date]);
   const sleepDuration = useMemo(
@@ -148,6 +249,51 @@ export default function App() {
         setFeedback({ type: "error", message: error.message });
       });
   }, [session?.user]);
+
+  useEffect(() => {
+    registerReminderActionListener(async (action) => {
+      const habit = habits.find((item) => item.id === action.habitId);
+      if (!habit) {
+        return;
+      }
+
+      try {
+        if (action.actionId === reminderActionIds.yes) {
+          await setHabitStatus(action.entryDate, action.habitId, true);
+          setHabitLog((current) => ({ ...current, [action.habitId]: true }));
+          setFeedback({ type: "success", message: `${habit.name} done mark ho gayi.` });
+          return;
+        }
+
+        if (action.actionId === reminderActionIds.no) {
+          await setHabitStatus(action.entryDate, action.habitId, false);
+          setHabitLog((current) => ({ ...current, [action.habitId]: false }));
+          setFeedback({ type: "success", message: `${habit.name} abhi not done par set ho gayi.` });
+          return;
+        }
+
+        if (action.actionId === reminderActionIds.later) {
+          await scheduleLaterReminder(habit, action.snoozeMinutes);
+          setFeedback({
+            type: "success",
+            message: `${habit.name} ka reminder ${action.snoozeMinutes} minutes baad dobara aayega.`
+          });
+        }
+      } catch (error) {
+        setFeedback({ type: "error", message: error.message });
+      }
+    });
+  }, [habits]);
+
+  useEffect(() => {
+    if (!habits.length) {
+      return;
+    }
+
+    syncHabitReminderNotifications(habits).catch((error) => {
+      setFeedback({ type: "error", message: error.message });
+    });
+  }, [habits]);
 
   async function persist(patch) {
     setSaving(true);
@@ -213,6 +359,7 @@ export default function App() {
 
   async function handleArchiveHabit(habitId) {
     try {
+      await clearHabitReminderNotifications(habitId);
       await archiveHabit(habitId);
       setHabits((current) => current.filter((habit) => habit.id !== habitId));
       setHabitLog((current) => {
@@ -228,6 +375,70 @@ export default function App() {
   async function handleLogout() {
     await signOut();
     await load(date);
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function openReminderEditor(habit) {
+    longPressLockRef.current = "";
+    setReminderEditor({
+      id: habit.id,
+      name: habit.name,
+      reminder_enabled: Boolean(habit.reminder_enabled),
+      reminder_time: habit.reminder_time ?? "",
+      reminder_message: habit.reminder_message ?? "",
+      reminder_snooze_minutes: Number(habit.reminder_snooze_minutes ?? 30)
+    });
+  }
+
+  function startHabitLongPress(habit) {
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressLockRef.current = habit.id;
+      openReminderEditor(habit);
+    }, 550);
+  }
+
+  async function handleSaveReminder() {
+    if (!reminderEditor) return;
+
+    if (reminderEditor.reminder_enabled && !reminderEditor.reminder_time) {
+      setFeedback({ type: "error", message: "Reminder enable karne ke liye time zaroori hai." });
+      return;
+    }
+
+    setReminderBusy(true);
+    try {
+      if (reminderEditor.reminder_enabled) {
+        const permission = await ensureReminderPermissions();
+        if (!permission.available) {
+          throw new Error("Notification permission grant kiye baghair reminder enable nahin ho sakta.");
+        }
+      }
+
+      const updated = await updateHabitReminder(reminderEditor.id, {
+        reminder_enabled: reminderEditor.reminder_enabled,
+        reminder_time: reminderEditor.reminder_time,
+        reminder_message: reminderEditor.reminder_message.trim(),
+        reminder_snooze_minutes: Number(reminderEditor.reminder_snooze_minutes || 30)
+      });
+
+      setHabits((current) =>
+        current.map((habit) => (habit.id === updated.id ? { ...habit, ...updated } : habit))
+      );
+      setFeedback({ type: "success", message: `${updated.name} ka reminder save ho gaya.` });
+      longPressLockRef.current = "";
+      setReminderEditor(null);
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message });
+    } finally {
+      setReminderBusy(false);
+    }
   }
 
   async function handleCreateToken() {
@@ -571,28 +782,56 @@ export default function App() {
               >
                 <h3 className="habit-name">{habit.name}</h3>
                 <div className="habit-subtitle">{habit.category || "habit"}</div>
+                <div className="habit-reminder-note">{describeReminder(habit)}</div>
 
                 <button
                   type="button"
                   className={cx("habit-toggle", habitLog[habit.id] && "checked")}
-                  onClick={() => handleToggleHabit(habit.id)}
+                  onClick={() => {
+                    if (longPressLockRef.current === habit.id) {
+                      longPressLockRef.current = "";
+                      return;
+                    }
+
+                    handleToggleHabit(habit.id);
+                  }}
                   aria-label={`Toggle ${habit.name}`}
                 />
 
-                <button
-                  type="button"
-                  className="tag-button"
-                  style={{
-                    position: "absolute",
-                    left: "18px",
-                    bottom: "12px",
-                    padding: "6px 10px",
-                    fontSize: "0.82rem"
+                <div
+                  className="habit-card-overlay"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openReminderEditor(habit);
                   }}
-                  onClick={() => handleArchiveHabit(habit.id)}
-                >
-                  Remove
-                </button>
+                  onPointerDown={(event) => {
+                    if (event.pointerType === "touch") {
+                      startHabitLongPress(habit);
+                    }
+                  }}
+                  onPointerUp={clearLongPressTimer}
+                  onPointerCancel={clearLongPressTimer}
+                  onPointerLeave={clearLongPressTimer}
+                />
+
+                <div className="habit-card-actions">
+                  <button
+                    type="button"
+                    className="tag-button"
+                    style={{ padding: "6px 10px", fontSize: "0.82rem" }}
+                    onClick={() => openReminderEditor(habit)}
+                  >
+                    Reminder
+                  </button>
+                  <button
+                    type="button"
+                    className="tag-button"
+                    style={{ padding: "6px 10px", fontSize: "0.82rem" }}
+                    onClick={() => handleArchiveHabit(habit.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -725,6 +964,19 @@ export default function App() {
           </p>
         </section>
       </section>
+
+      {reminderEditor ? (
+        <ReminderDialog
+          value={reminderEditor}
+          onChange={setReminderEditor}
+          onClose={() => {
+            longPressLockRef.current = "";
+            setReminderEditor(null);
+          }}
+          onSave={handleSaveReminder}
+          busy={reminderBusy}
+        />
+      ) : null}
     </main>
   );
 }
