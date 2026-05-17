@@ -1,0 +1,17 @@
+{
+  "name": "MeTrack: Habit Builder",
+  "short_name": "MeTrack",
+  "description": "Daily routine, mood, and reflection tracker.",
+  "theme_color": "#f8f3e8",
+  "background_color": "#f8f3e8",
+  "display": "standalone",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
