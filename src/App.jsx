@@ -9,6 +9,7 @@ import {
   signIn,
   signOut,
   signUp,
+  subscribeToAuthChanges,
   toggleHabit
 } from "./api.js";
 import { DAY_RATING_STARS, MOOD_OPTIONS, QUALITY_STARS, WEEKDAY_LABELS } from "./defaults.js";
@@ -111,6 +112,19 @@ export default function App() {
     load(date);
   }, [date, load]);
 
+  useEffect(() => {
+    let unsubscribe = () => {};
+
+    subscribeToAuthChanges((nextSession) => {
+      setSession(nextSession);
+      load(date);
+    }).then((cleanup) => {
+      unsubscribe = cleanup;
+    });
+
+    return () => unsubscribe();
+  }, [date, load]);
+
   async function persist(patch) {
     setSaving(true);
 
@@ -131,15 +145,20 @@ export default function App() {
     try {
       if (authMode === "signin") {
         await signIn(authForm.email, authForm.password);
+        setFeedback({ type: "success", message: "Login ho gaya." });
       } else {
-        await signUp(authForm.email, authForm.password);
+        const result = await signUp(authForm.email, authForm.password);
+        if (result.needsEmailVerification) {
+          setFeedback({
+            type: "success",
+            message: "Account create ho gaya. Email verify karke phir login karein."
+          });
+          return;
+        }
+        setFeedback({ type: "success", message: "Account create ho gaya." });
       }
 
       await load(date);
-      setFeedback({
-        type: "success",
-        message: authMode === "signin" ? "Login ho gaya." : "Account create ho gaya."
-      });
     } catch (error) {
       setFeedback({ type: "error", message: error.message });
     }
@@ -345,10 +364,7 @@ export default function App() {
 
           <div className="reflection-block">
             <h3>Sleep Quality</h3>
-            <StarSelector
-              value={entry.sleep_quality ?? 0}
-              onPick={(value) => persist({ sleep_quality: value })}
-            />
+            <StarSelector value={entry.sleep_quality ?? 0} onPick={(value) => persist({ sleep_quality: value })} />
             <div style={{ marginTop: "12px" }} />
             <textarea
               value={entry.sleep_quality_note ?? ""}
@@ -486,10 +502,7 @@ export default function App() {
             <div className="split-grid">
               <div className="reflection-block">
                 <h3>Mood Tracker</h3>
-                <MoodSelector
-                  value={entry.mood_key ?? ""}
-                  onPick={(value) => persist({ mood_key: value })}
-                />
+                <MoodSelector value={entry.mood_key ?? ""} onPick={(value) => persist({ mood_key: value })} />
 
                 <div className="section-divider" />
 
