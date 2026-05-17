@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   archiveHabit,
+  createMcpToken,
   createHabit,
   ensureDefaultHabits,
   getDailyState,
   getSession,
+  listMcpTokens,
+  revokeMcpToken,
   saveEntryFields,
   signIn,
   signOut,
@@ -83,6 +86,10 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ email: "", password: "" });
   const [newHabit, setNewHabit] = useState("");
   const [feedback, setFeedback] = useState(null);
+  const [mcpTokens, setMcpTokens] = useState([]);
+  const [tokenLabel, setTokenLabel] = useState("Primary Agent");
+  const [createdToken, setCreatedToken] = useState("");
+  const [tokenBusy, setTokenBusy] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => {
     return window.localStorage.getItem("metrack-welcome-dismissed") !== "yes";
   });
@@ -127,6 +134,20 @@ export default function App() {
 
     return () => unsubscribe();
   }, [date, load]);
+
+  useEffect(() => {
+    if (!session?.user) {
+      setMcpTokens([]);
+      setCreatedToken("");
+      return;
+    }
+
+    listMcpTokens()
+      .then(setMcpTokens)
+      .catch((error) => {
+        setFeedback({ type: "error", message: error.message });
+      });
+  }, [session?.user]);
 
   async function persist(patch) {
     setSaving(true);
@@ -209,6 +230,39 @@ export default function App() {
     await load(date);
   }
 
+  async function handleCreateToken() {
+    const trimmed = tokenLabel.trim();
+    if (!trimmed) return;
+
+    setTokenBusy(true);
+    try {
+      const created = await createMcpToken({ label: trimmed });
+      setCreatedToken(created.token);
+      setMcpTokens((current) => [created.record, ...current]);
+      setFeedback({
+        type: "success",
+        message: "Naya MCP token generate ho gaya. Isay sirf trusted agent ke saath use karein."
+      });
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message });
+    } finally {
+      setTokenBusy(false);
+    }
+  }
+
+  async function handleRevokeToken(tokenId) {
+    setTokenBusy(true);
+    try {
+      await revokeMcpToken(tokenId);
+      setMcpTokens((current) => current.filter((item) => item.id !== tokenId));
+      setFeedback({ type: "success", message: "MCP token revoke kar diya gaya." });
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message });
+    } finally {
+      setTokenBusy(false);
+    }
+  }
+
   function dismissWelcome(mode = "preview") {
     if (mode === "preview") {
       window.localStorage.setItem("metrack-welcome-dismissed", "yes");
@@ -283,6 +337,61 @@ export default function App() {
                 <button type="button" className="action secondary" onClick={handleLogout}>
                   Logout
                 </button>
+              </div>
+
+              <div className="section-divider" />
+              <span className="field-label">MCP Access Tokens</span>
+              <div className="subtle-note">
+                Password ki jagah ab agent access ke liye yeh tokens use karein. Token sirf aik
+                dafa poora show hota hai.
+              </div>
+              <div className="panel-row">
+                <Field label="Token Label">
+                  <input
+                    type="text"
+                    value={tokenLabel}
+                    onChange={(event) => setTokenLabel(event.target.value)}
+                    placeholder="Primary Agent"
+                  />
+                </Field>
+                <div style={{ display: "flex", alignItems: "end" }}>
+                  <button type="button" className="action" onClick={handleCreateToken} disabled={tokenBusy}>
+                    {tokenBusy ? "Working..." : "Generate Token"}
+                  </button>
+                </div>
+              </div>
+
+              {createdToken ? (
+                <div className="token-box">
+                  <strong>New Token</strong>
+                  <code>{createdToken}</code>
+                </div>
+              ) : null}
+
+              <div className="token-list">
+                {mcpTokens.length ? (
+                  mcpTokens.map((token) => (
+                    <div key={token.id} className="token-row">
+                      <div>
+                        <strong>{token.label}</strong>
+                        <div className="subtle-note">
+                          Prefix: {token.token_prefix} | Expires:{" "}
+                          {token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "n/a"}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="action secondary"
+                        onClick={() => handleRevokeToken(token.id)}
+                        disabled={tokenBusy}
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="subtle-note">Abhi koi active MCP token nahin hai.</div>
+                )}
               </div>
             </div>
           ) : (
