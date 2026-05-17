@@ -1,0 +1,407 @@
+import { DEFAULT_HABITS, MOOD_OPTIONS } from "./defaults.js";
+import { calculateSleepDuration, createLocalId, slugifyHabitName } from "./lib.js";
+import { getSupabaseClient, hasSupabaseConfig } from "./supabase.js";
+
+const LOCAL_STORAGE_KEY = "metrack-local-state-v1";
+
+function getDefaultEntry(date) {
+  return {
+    entry_date: date,
+    sleep_time: "",
+    wake_time: "",
+    sleep_duration_minutes: null,
+    sleep_duration_label: "",
+    sleep_quality: 0,
+    sleep_quality_note: "",
+    screen_time: "",
+    mood_key: "",
+    mood_label: "",
+    mood_emoji: "",
+    day_rating: 0,
+    best_moment: "",
+    improved_today: "",
+    gratitude: "",
+    review: "",
+    goals_achieved: "",
+    still_working_on: "",
+    focus_for_tomorrow: "",
+    intentions_for_tomorrow: ""
+  };
+}
+
+function buildDefaultHabits() {
+  return DEFAULT_HABITS.map((habit, index) => ({
+    id: createLocalId("habit"),
+    slug: slugifyHabitName(habit.name),
+    name: habit.name,
+    color: habit.color,
+    category: habit.category,
+    is_binary: true,
+    position: index,
+    is_archived: false
+  }));
+}
+
+function getLocalState() {
+  const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+  if (raw) {
+    return JSON.parse(raw);
+  }
+
+  const fresh = {
+    habits: buildDefaultHabits(),
+    entries: {},
+    habitLogs: {},
+    session: null
+  };
+
+  window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(fresh));
+  return fresh;
+}
+
+function setLocalState(nextState) {
+  window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextState));
+}
+
+function getMoodPayload(moodKey) {
+  return MOOD_OPTIONS.find((item) => item.key === moodKey) ?? {
+    key: "",
+    label: "",
+    emoji: ""
+  };
+}
+
+async function getRemoteSession() {
+  if (!hasSupabaseConfig) {
+    return null;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+function getOrCreateLocalEntry(date) {
+  const state = getLocalState();
+  if (!state.entries[date]) {
+    state.entries[date] = getDefaultEntry(date);
+    setLocalState(state);
+  }
+
+  return state.entries[date];
+}
+
+function getOrCreateLocalHabitLog(date, habits) {
+  const state = getLocalState();
+
+  if (!state.habitLogs[date]) {
+    state.habitLogs[date] = Object.fromEntries(habits.map((habit) => [habit.id, false]));
+    setLocalState(state);
+  }
+
+  return state.habitLogs[date];
+}
+
+export async function getSession() {
+  if (!hasSupabaseConfig) {
+    return getLocalState().session;
+  }
+
+  return getRemoteSession();
+}
+
+export async function signIn(email, password) {
+  if (!hasSupabaseConfig) {
+    const state = getLocalState();
+    state.session = {
+      user: {
+        id: "local-user",
+        email
+      }
+    };
+    setLocalState(state);
+    return state.session;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    throw error;
+  }
+
+  return data.session;
+}
+
+export async function signUp(email, password) {
+  if (!hasSupabaseConfig) {
+    return signIn(email, password);
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) {
+    throw error;
+  }
+
+  return data.session;
+}
+
+export async function signOut() {
+  if (!hasSupabaseConfig) {
+    const state = getLocalState();
+    state.session = null;
+    setLocalState(state);
+    return;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    throw error;
+  }
+}
+
+export async function ensureDefaultHabits() {
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const state = getLocalState();
+    if (!state.habits?.length) {
+      state.habits = buildDefaultHabits();
+      setLocalState(state);
+    }
+    return state.habits;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data: existing, error: existingError } = await supabase
+    .from("user_habits")
+    .select("*")
+    .eq("is_archived", false)
+    .order("position", { ascending: true });
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  if (existing.length) {
+    return existing;
+  }
+
+  const { data, error } = await supabase
+    .from("user_habits")
+    .insert(
+      buildDefaultHabits().map((habit, index) => ({
+        name: habit.name,
+        slug: habit.slug,
+        color: habit.color,
+        category: habit.category,
+        position: index,
+        is_binary: true
+      }))
+    )
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function listHabits() {
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    return getLocalState().habits ?? buildDefaultHabits();
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from("user_habits")
+    .select("*")
+    .eq("is_archived", false)
+    .order("position", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function createHabit(name) {
+  const slug = slugifyHabitName(name);
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const state = getLocalState();
+    const habit = {
+      id: createLocalId("habit"),
+      slug,
+      name,
+      color: "var(--mint)",
+      category: "custom",
+      is_binary: true,
+      position: state.habits.length,
+      is_archived: false
+    };
+    state.habits.push(habit);
+    setLocalState(state);
+    return habit;
+  }
+
+  const supabase = await getSupabaseClient();
+  const habits = await listHabits();
+  const { data, error } = await supabase
+    .from("user_habits")
+    .insert({
+      name,
+      slug,
+      color: "var(--mint)",
+      category: "custom",
+      is_binary: true,
+      position: habits.length
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function archiveHabit(habitId) {
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const state = getLocalState();
+    state.habits = state.habits.filter((habit) => habit.id !== habitId);
+    Object.keys(state.habitLogs).forEach((date) => {
+      delete state.habitLogs[date][habitId];
+    });
+    setLocalState(state);
+    return;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase
+    .from("user_habits")
+    .update({ is_archived: true, archived_at: new Date().toISOString() })
+    .eq("id", habitId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function upsertEntry(entry) {
+  const duration = calculateSleepDuration(entry.sleep_time, entry.wake_time);
+  const payload = {
+    ...entry,
+    sleep_duration_minutes: duration.minutes,
+    sleep_duration_label: duration.label
+  };
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const state = getLocalState();
+    state.entries[entry.entry_date] = payload;
+    setLocalState(state);
+    return payload;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from("daily_entries")
+    .upsert(payload, { onConflict: "user_id,entry_date" })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function getDailyState(date) {
+  const habits = await ensureDefaultHabits();
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const entry = getOrCreateLocalEntry(date);
+    const habitLog = getOrCreateLocalHabitLog(date, habits);
+    return { entry, habits, habitLog };
+  }
+
+  const supabase = await getSupabaseClient();
+  const { data: entryRows, error: entryError } = await supabase
+    .from("daily_entries")
+    .select("*")
+    .eq("entry_date", date)
+    .limit(1);
+
+  if (entryError) {
+    throw entryError;
+  }
+
+  let entry = entryRows[0];
+
+  if (!entry) {
+    entry = await upsertEntry(getDefaultEntry(date));
+  }
+
+  const { data: logs, error: logsError } = await supabase
+    .from("daily_habit_logs")
+    .select("habit_id, done")
+    .eq("entry_id", entry.id);
+
+  if (logsError) {
+    throw logsError;
+  }
+
+  const habitLog = Object.fromEntries(habits.map((habit) => [habit.id, false]));
+  logs.forEach((row) => {
+    habitLog[row.habit_id] = row.done;
+  });
+
+  return { entry, habits, habitLog };
+}
+
+export async function saveEntryFields(date, patch) {
+  const current = hasSupabaseConfig && (await getRemoteSession())
+    ? (await getDailyState(date)).entry
+    : getOrCreateLocalEntry(date);
+  const next = { ...current, ...patch, entry_date: date };
+
+  if (patch.mood_key) {
+    const mood = getMoodPayload(patch.mood_key);
+    next.mood_key = mood.key;
+    next.mood_label = mood.label;
+    next.mood_emoji = mood.emoji;
+  }
+
+  return upsertEntry(next);
+}
+
+export async function toggleHabit(date, habitId) {
+  const state = await getDailyState(date);
+  const nextValue = !state.habitLog[habitId];
+
+  if (!hasSupabaseConfig || !(await getRemoteSession())) {
+    const local = getLocalState();
+    local.habitLogs[date][habitId] = nextValue;
+    setLocalState(local);
+    return nextValue;
+  }
+
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.from("daily_habit_logs").upsert(
+    {
+      entry_id: state.entry.id,
+      habit_id: habitId,
+      done: nextValue
+    },
+    { onConflict: "entry_id,habit_id" }
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return nextValue;
+}
