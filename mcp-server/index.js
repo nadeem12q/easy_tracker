@@ -216,6 +216,57 @@ function buildHabitConsistency(habits, entries, logs, requestedDays) {
   return Array.from(grouped.values()).sort((a, b) => b.completion_rate - a.completion_rate);
 }
 
+function buildMissedHabitsReport(habits, logs, entryId) {
+  const doneMap = new Map(
+    logs.filter((log) => log.entry_id === entryId).map((log) => [log.habit_id, Boolean(log.done)])
+  );
+
+  return habits
+    .filter((habit) => !doneMap.get(habit.id))
+    .map((habit) => ({
+      habit_id: habit.id,
+      habit_name: habit.name,
+      category: habit.category
+    }));
+}
+
+function buildTopStrugglesReport(consistencyRows, limit = 5) {
+  return [...consistencyRows]
+    .sort((a, b) => {
+      if (a.completion_rate !== b.completion_rate) {
+        return a.completion_rate - b.completion_rate;
+      }
+      return a.current_streak - b.current_streak;
+    })
+    .slice(0, limit);
+}
+
+function buildRecommendedFocus(consistencyRows, reflectionSummary, latestEntry) {
+  const weakHabits = buildTopStrugglesReport(consistencyRows, 3);
+  const suggestions = [];
+
+  weakHabits.forEach((habit) => {
+    suggestions.push(`Kal ${habit.habit_name} par khas focus rakhein.`);
+  });
+
+  if ((reflectionSummary.improvement_mentions ?? 0) === 0) {
+    suggestions.push("Kal ek chhota improvement note zaroor likhein.");
+  }
+
+  if ((reflectionSummary.gratitude_mentions ?? 0) === 0) {
+    suggestions.push("Kal gratitude section bharne ki niyyat rakhein.");
+  }
+
+  if (!latestEntry?.sleep_duration_minutes || latestEntry.sleep_duration_minutes < 420) {
+    suggestions.push("Kal sleep routine ko stabilize karne ki koshish karein.");
+  }
+
+  return {
+    based_on_habits: weakHabits,
+    suggestions: suggestions.slice(0, 5)
+  };
+}
+
 async function getDailyEntry(entryDate) {
   requireSession();
   const rows = await authFetch(
@@ -356,6 +407,42 @@ async function listTools() {
       {
         name: "reflection_pattern_report",
         description: "Mood, reflection usage aur sleep pattern ka readable report deta hai.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            end_date: { type: "string" },
+            days: { type: "integer" }
+          },
+          required: ["end_date"]
+        }
+      },
+      {
+        name: "missed_habits_report",
+        description: "Kisi specific din ki woh habits batata hai jo abhi done nahin hui.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entry_date: { type: "string" }
+          },
+          required: ["entry_date"]
+        }
+      },
+      {
+        name: "top_struggles_report",
+        description: "Recent days mein sab se weak habits identify karta hai.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            end_date: { type: "string" },
+            days: { type: "integer" },
+            limit: { type: "integer" }
+          },
+          required: ["end_date"]
+        }
+      },
+      {
+        name: "recommended_focus_for_tomorrow",
+        description: "Recent pattern dekh kar kal ke liye short focus recommendations deta hai.",
         inputSchema: {
           type: "object",
           properties: {
@@ -525,6 +612,60 @@ async function callTool(name, args) {
           ? Math.round(totalSleepMinutes / sleepTrackedDays)
           : 0,
         reflection_activity: summarizeReflectionText(entries)
+      };
+    }
+
+    case "missed_habits_report": {
+      requireSession();
+      const [entry, habits] = await Promise.all([
+        createOrGetDailyEntry(args.entry_date),
+        getHabits()
+      ]);
+      const logs = await authFetch(
+        `/rest/v1/daily_habit_logs?select=entry_id,habit_id,done&entry_id=eq.${entry.id}`
+      );
+      return {
+        entry_date: args.entry_date,
+        missed_habits: buildMissedHabitsReport(habits, logs, entry.id)
+      };
+    }
+
+    case "top_struggles_report": {
+      requireSession();
+      const days = Math.max(1, Math.min(args.days ?? 14, 90));
+      const startDate = shiftDate(args.end_date, -(days - 1));
+      const [habits, entries] = await Promise.all([
+        getHabits(),
+        getEntriesBetween(startDate, args.end_date)
+      ]);
+      const logs = await getLogsForEntryIds(entries.map((entry) => entry.id));
+      const consistencyRows = buildHabitConsistency(habits, entries, logs, days);
+      return {
+        start_date: startDate,
+        end_date: args.end_date,
+        days,
+        struggles: buildTopStrugglesReport(consistencyRows, args.limit ?? 5)
+      };
+    }
+
+    case "recommended_focus_for_tomorrow": {
+      requireSession();
+      const days = Math.max(1, Math.min(args.days ?? 14, 90));
+      const startDate = shiftDate(args.end_date, -(days - 1));
+      const [habits, entries] = await Promise.all([
+        getHabits(),
+        getEntriesBetween(startDate, args.end_date)
+      ]);
+      const logs = await getLogsForEntryIds(entries.map((entry) => entry.id));
+      const consistencyRows = buildHabitConsistency(habits, entries, logs, days);
+      const reflectionSummary = summarizeReflectionText(entries);
+      const latestEntry = entries[entries.length - 1] ?? null;
+
+      return {
+        start_date: startDate,
+        end_date: args.end_date,
+        days,
+        ...buildRecommendedFocus(consistencyRows, reflectionSummary, latestEntry)
       };
     }
 
