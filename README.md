@@ -75,6 +75,12 @@ npm run preview
 3. Frontend `.env` values set karein
 
 Is schema mein signup ke baad default habits backend level par auto-seed ho jati hain.
+Security hardening ke liye is mein yeh bhi add hai:
+
+- `mcp_api_tokens` for password-free MCP access
+- `mcp_audit_logs` for MCP action trail
+- stronger input constraints and length checks
+- extra indexes for user-scoped access paths
 
 ## Android app
 
@@ -103,9 +109,15 @@ SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY \
 npm run mcp
 ```
 
+Optional:
+
+```bash
+MCP_GATEWAY_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/mcp-gateway
+```
+
 ### Available tools
 
-- `sign_in`
+- `authenticate_with_token`
 - `sign_out`
 - `who_am_i`
 - `get_today_dashboard`
@@ -125,4 +137,11 @@ npm run mcp
 - `momentum_report`
 - `coaching_brief`
 
-Yeh structure is liye rakha gaya hai taake user kisi bhi LLM ya agent ko MCP attach karke tracker ko natural language mein update karwa sake.
+MCP ka secure flow ab yeh hai:
+
+1. User app ke signed-in area se MCP token generate kare
+2. Agent `authenticate_with_token` tool se connect ho
+3. MCP server token ko Supabase Edge Function gateway ke through verify kare
+4. Har action audit log mein record ho
+
+Yeh structure is liye rakha gaya hai taake user kisi bhi LLM ya agent ko MCP attach karke tracker ko natural language mein update karwa sake, bina account password share kiye.
