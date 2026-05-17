@@ -37,6 +37,15 @@ Aur agent woh sab MeTrack account mein direct save kar sake.
    - `weekly_summary`
    - `habit_consistency_report`
    - `reflection_pattern_report`
+   - `missed_habits_report`
+   - `top_struggles_report`
+   - `recommended_focus_for_tomorrow`
+   - `daily_gap_analysis`
+   - `streak_risk_report`
+   - `momentum_report`
+   - `coaching_brief`
+4. Agent workflow tools
+   - `capture_day_update`
 
 ## Why this shape practical hai
 
@@ -51,3 +60,13 @@ Production phase mein `sign_in(email,password)` ke ilawa ye do cheezen useful ho
 
 1. App-generated personal access tokens
 2. Dedicated edge functions for summary + analysis endpoints
+
+## Current advanced layer
+
+Ab server sirf CRUD tak limited nahin raha. Is mein yeh advanced use cases cover ho rahe hain:
+
+- Agent aik hi call mein poora din fill kar sakta hai through `capture_day_update`
+- Kisi specific din ki missing cheezen `daily_gap_analysis` se mil jati hain
+- Weak ya tootne wali habits `streak_risk_report` se identify ho jati hain
+- Current vs previous period progress `momentum_report` se compare hoti hai
+- `coaching_brief` habits, reflections aur trend ko combine karke human-readable short guidance deta hai
