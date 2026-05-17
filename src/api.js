@@ -1,4 +1,4 @@
-import { DEFAULT_HABITS, MOOD_OPTIONS } from "./defaults.js";
+import { DEFAULT_HABIT_SEED, DEFAULT_HABITS, MOOD_OPTIONS } from "./defaults.js";
 import { calculateSleepDuration, createLocalId, slugifyHabitName } from "./lib.js";
 import { getSupabaseClient, hasSupabaseConfig } from "./supabase.js";
 
@@ -30,14 +30,14 @@ function getDefaultEntry(date) {
 }
 
 function buildDefaultHabits() {
-  return DEFAULT_HABITS.map((habit, index) => ({
+  return DEFAULT_HABIT_SEED.map((habit, index) => ({
     id: createLocalId("habit"),
-    slug: slugifyHabitName(habit.name),
+    slug: habit.slug ?? slugifyHabitName(habit.name),
     name: habit.name,
     color: habit.color,
     category: habit.category,
     is_binary: true,
-    position: index,
+    position: habit.position ?? index,
     is_archived: false
   }));
 }
@@ -143,7 +143,26 @@ export async function signUp(email, password) {
     throw error;
   }
 
-  return data.session;
+  return {
+    session: data.session,
+    user: data.user,
+    needsEmailVerification: !data.session
+  };
+}
+
+export async function subscribeToAuthChanges(onChange) {
+  if (!hasSupabaseConfig) {
+    return () => {};
+  }
+
+  const supabase = await getSupabaseClient();
+  const {
+    data: { subscription }
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    onChange(session);
+  });
+
+  return () => subscription.unsubscribe();
 }
 
 export async function signOut() {
@@ -189,12 +208,12 @@ export async function ensureDefaultHabits() {
   const { data, error } = await supabase
     .from("user_habits")
     .insert(
-      buildDefaultHabits().map((habit, index) => ({
+      DEFAULT_HABIT_SEED.map((habit, index) => ({
         name: habit.name,
         slug: habit.slug,
         color: habit.color,
         category: habit.category,
-        position: index,
+        position: habit.position ?? index,
         is_binary: true
       }))
     )
