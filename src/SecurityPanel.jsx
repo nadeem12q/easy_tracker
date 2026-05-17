@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import "./security.css";
 import {
   createMcpToken,
   listMcpAuditLogs,
