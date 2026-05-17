@@ -315,6 +315,12 @@ textarea {
   color: rgba(60, 44, 31, 0.68);
 }
 
+.habit-reminder-note {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: rgba(52, 39, 28, 0.74);
+}
+
 .habit-toggle {
   position: absolute;
   top: 50%;
@@ -331,6 +337,31 @@ textarea {
   background: rgba(48, 108, 62, 0.88);
   border-color: rgba(48, 108, 62, 0.88);
   box-shadow: inset 0 0 0 8px rgba(255, 248, 240, 0.85);
+}
+
+.habit-card-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+}
+
+.habit-card-actions {
+  position: absolute;
+  left: 18px;
+  right: 72px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 2;
+}
+
+.habit-name,
+.habit-subtitle,
+.habit-reminder-note,
+.habit-toggle {
+  position: relative;
+  z-index: 2;
 }
 
 .inline-grid {
@@ -499,6 +530,55 @@ textarea {
   color: var(--danger);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(34, 28, 22, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.modal-sheet {
+  width: min(640px, 100%);
+  padding: 22px;
+  border-radius: 28px;
+  background: rgba(255, 250, 241, 0.96);
+  border: 1px solid rgba(86, 61, 34, 0.12);
+  box-shadow: 0 24px 70px rgba(34, 28, 22, 0.18);
+}
+
+.modal-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.modal-title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 0.95;
+  font-weight: 600;
+}
+
+.switch-row {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.switch-row input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
 .footer-note {
   margin-top: 22px;
   color: #6b5a4c;
@@ -547,6 +627,16 @@ textarea {
 
   .token-row {
     display: grid;
+  }
+
+  .modal-header,
+  .switch-row,
+  .habit-card-actions {
+    align-items: stretch;
+  }
+
+  .habit-card-actions {
+    right: 18px;
   }
 
   .display-title {
