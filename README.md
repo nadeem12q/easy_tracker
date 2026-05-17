@@ -20,6 +20,12 @@ MeTrack aik personal daily routine aur reflection tracker hai jo printed thermal
   Supabase client setup
 - `styles.css`
   App styling
+- `capacitor.config.ts`
+  Android shell config
+- `public/manifest.webmanifest`
+  Installable web app metadata
+- `resources/android/*`
+  Android icon and splash source assets
 - `supabase/schema.sql`
   Full backend schema + RLS
 - `mcp-server/index.js`
@@ -47,6 +53,14 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 npm run dev
 ```
 
+## App open behavior
+
+- App open hote hi user ko clean preview milta hai
+- Account create karna force nahin hota
+- First open par onboarding panel batata hai ke preview mode aur account mode mein kya farq hai
+- Login/signup karne ke baad data personal account ke saath save hota hai
+- New account par default habits backend level par automatically create ho jati hain
+
 ## Production build
 
 ```bash
@@ -65,13 +79,21 @@ Is schema mein signup ke baad default habits backend level par auto-seed ho jati
 ## Android app
 
 ```bash
-npx cap add android
+npm run android:init
 npm run build
-npm run android:sync
+npm run android:build
 npm run android:open
 ```
 
-`capacitor.config.json` already `dist` build output ke liye configured hai.
+Android side par yeh cheezen ready hain:
+
+- `capacitor.config.ts` production-style config
+- app id aur app name set
+- splash, status bar, keyboard plugin config
+- PWA manifest aur favicon
+- Android icon/splash source SVG assets
+
+Capacitor assets generate karne ke liye aap apni machine par baad mein `@capacitor/assets` ya Android Studio based asset workflow use kar sakte hain.
 
 ## MCP server
 
