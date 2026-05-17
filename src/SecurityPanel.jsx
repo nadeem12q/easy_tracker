@@ -5,7 +5,7 @@ import {
   listMcpSecurityEvents,
   listMcpTokens,
   revokeMcpToken
-} from "./api.js";
+} from "./securityApi.js";
 
 const EXPIRY_OPTIONS = [
   { label: "7 days", value: "7" },
@@ -139,6 +139,7 @@ export default function SecurityPanel({ setFeedback }) {
         <button type="button" className={cx("tag-button", tab === "tokens" && "active")} onClick={() => setTab("tokens")}>Tokens</button>
         <button type="button" className={cx("tag-button", tab === "audit" && "active")} onClick={() => setTab("audit")}>Audit Logs</button>
         <button type="button" className={cx("tag-button", tab === "events" && "active")} onClick={() => setTab("events")}>Security Events</button>
+        <button type="button" className="tag-button" onClick={refreshSecurityData} disabled={busy}>Refresh</button>
       </div>
 
       {tab === "tokens" ? (
