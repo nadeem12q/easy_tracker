@@ -45,3 +45,28 @@ export function calculateSleepDuration(sleepTime, wakeTime) {
 export function createLocalId(prefix = "item") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
+
+export function formatTimeLabel(timeText) {
+  if (!timeText) return "No reminder";
+
+  const [hourText, minuteText] = String(timeText).split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return timeText;
+  }
+
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const normalizedHour = hour % 12 || 12;
+  return `${normalizedHour}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
+export function hashToInt(value) {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+
+  return Math.abs(hash) || 1;
+}
