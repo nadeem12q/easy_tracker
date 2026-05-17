@@ -416,6 +416,38 @@ textarea {
   color: #736457;
 }
 
+.token-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 252, 246, 0.8);
+  border: 1px solid rgba(95, 72, 48, 0.12);
+}
+
+.token-box code {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  color: #2f251d;
+}
+
+.token-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(78, 58, 38, 0.1);
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -508,8 +540,13 @@ textarea {
   }
 
   .panel-row,
-  .inline-grid {
+  .inline-grid,
+  .token-row {
     grid-template-columns: 1fr;
+  }
+
+  .token-row {
+    display: grid;
   }
 
   .display-title {
