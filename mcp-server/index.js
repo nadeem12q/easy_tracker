@@ -9,6 +9,20 @@ const DEFAULT_HEADERS = {
 
 let authSession = null;
 
+function startOfDay(dateText) {
+  return new Date(`${dateText}T00:00:00Z`);
+}
+
+function formatDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftDate(dateText, offsetDays) {
+  const date = startOfDay(dateText);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return formatDate(date);
+}
+
 function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -99,6 +113,107 @@ function whoAmI() {
 async function getHabits() {
   requireSession();
   return authFetch("/rest/v1/user_habits?select=id,name,slug,category,color,position,is_archived&is_archived=eq.false&order=position.asc");
+}
+
+async function getEntriesBetween(startDate, endDate) {
+  requireSession();
+  return authFetch(
+    `/rest/v1/daily_entries?select=id,entry_date,mood_key,mood_label,day_rating,sleep_duration_minutes,sleep_duration_label,gratitude,review,best_moment,improved_today&entry_date=gte.${startDate}&entry_date=lte.${endDate}&order=entry_date.asc`
+  );
+}
+
+async function getLogsForEntryIds(entryIds) {
+  requireSession();
+  if (!entryIds.length) {
+    return [];
+  }
+
+  const filter = `(${entryIds.join(",")})`;
+  return authFetch(
+    `/rest/v1/daily_habit_logs?select=entry_id,habit_id,done&entry_id=in.${filter}`
+  );
+}
+
+function summarizeReflectionText(entries) {
+  const buckets = {
+    gratitude_mentions: 0,
+    review_mentions: 0,
+    best_moment_mentions: 0,
+    improvement_mentions: 0
+  };
+
+  entries.forEach((entry) => {
+    if (entry.gratitude?.trim()) buckets.gratitude_mentions += 1;
+    if (entry.review?.trim()) buckets.review_mentions += 1;
+    if (entry.best_moment?.trim()) buckets.best_moment_mentions += 1;
+    if (entry.improved_today?.trim()) buckets.improvement_mentions += 1;
+  });
+
+  return buckets;
+}
+
+function buildHabitConsistency(habits, entries, logs, requestedDays) {
+  const grouped = new Map();
+
+  habits.forEach((habit) => {
+    grouped.set(habit.id, {
+      habit_id: habit.id,
+      habit_name: habit.name,
+      days_done: 0,
+      completion_rate: 0,
+      current_streak: 0,
+      best_streak: 0
+    });
+  });
+
+  logs.forEach((log) => {
+    if (!log.done || !grouped.has(log.habit_id)) return;
+    grouped.get(log.habit_id).days_done += 1;
+  });
+
+  habits.forEach((habit) => {
+    const item = grouped.get(habit.id);
+    item.completion_rate = requestedDays
+      ? Number(((item.days_done / requestedDays) * 100).toFixed(1))
+      : 0;
+
+    const datesDone = entries
+      .filter((entry) =>
+        logs.some((log) => log.entry_id === entry.id && log.habit_id === habit.id && log.done)
+      )
+      .map((entry) => entry.entry_date);
+
+    let current = 0;
+    let best = 0;
+    let running = 0;
+    let previousDate = null;
+
+    datesDone.forEach((dateText) => {
+      if (!previousDate) {
+        running = 1;
+      } else {
+        const expectedPrev = shiftDate(dateText, -1);
+        running = previousDate === expectedPrev ? running + 1 : 1;
+      }
+
+      best = Math.max(best, running);
+      previousDate = dateText;
+    });
+
+    const today = entries[entries.length - 1]?.entry_date;
+    if (today) {
+      let cursor = today;
+      while (datesDone.includes(cursor)) {
+        current += 1;
+        cursor = shiftDate(cursor, -1);
+      }
+    }
+
+    item.current_streak = current;
+    item.best_streak = best;
+  });
+
+  return Array.from(grouped.values()).sort((a, b) => b.completion_rate - a.completion_rate);
 }
 
 async function getDailyEntry(entryDate) {
@@ -225,6 +340,30 @@ async function listTools() {
           },
           required: ["end_date"]
         }
+      },
+      {
+        name: "habit_consistency_report",
+        description: "Habits ki consistency, streaks aur completion rate report deta hai.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            end_date: { type: "string" },
+            days: { type: "integer" }
+          },
+          required: ["end_date"]
+        }
+      },
+      {
+        name: "reflection_pattern_report",
+        description: "Mood, reflection usage aur sleep pattern ka readable report deta hai.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            end_date: { type: "string" },
+            days: { type: "integer" }
+          },
+          required: ["end_date"]
+        }
       }
     ]
   };
@@ -331,6 +470,62 @@ async function callTool(name, args) {
         `/rest/v1/daily_entries?select=entry_date,mood_key,day_rating,sleep_duration_label&order=entry_date.desc&entry_date=lte.${args.end_date}&limit=7`
       );
       return { entries: rows };
+    }
+
+    case "habit_consistency_report": {
+      requireSession();
+      const days = Math.max(1, Math.min(args.days ?? 14, 90));
+      const startDate = shiftDate(args.end_date, -(days - 1));
+      const [habits, entries] = await Promise.all([
+        getHabits(),
+        getEntriesBetween(startDate, args.end_date)
+      ]);
+      const logs = await getLogsForEntryIds(entries.map((entry) => entry.id));
+      return {
+        start_date: startDate,
+        end_date: args.end_date,
+        days,
+        habits: buildHabitConsistency(habits, entries, logs, days)
+      };
+    }
+
+    case "reflection_pattern_report": {
+      requireSession();
+      const days = Math.max(1, Math.min(args.days ?? 14, 90));
+      const startDate = shiftDate(args.end_date, -(days - 1));
+      const entries = await getEntriesBetween(startDate, args.end_date);
+      const moodCounts = {};
+      let ratedDays = 0;
+      let totalRating = 0;
+      let sleepTrackedDays = 0;
+      let totalSleepMinutes = 0;
+
+      entries.forEach((entry) => {
+        if (entry.mood_key) {
+          moodCounts[entry.mood_key] = (moodCounts[entry.mood_key] ?? 0) + 1;
+        }
+        if (entry.day_rating) {
+          ratedDays += 1;
+          totalRating += entry.day_rating;
+        }
+        if (entry.sleep_duration_minutes) {
+          sleepTrackedDays += 1;
+          totalSleepMinutes += entry.sleep_duration_minutes;
+        }
+      });
+
+      return {
+        start_date: startDate,
+        end_date: args.end_date,
+        days,
+        total_entries: entries.length,
+        mood_counts: moodCounts,
+        average_day_rating: ratedDays ? Number((totalRating / ratedDays).toFixed(2)) : 0,
+        average_sleep_minutes: sleepTrackedDays
+          ? Math.round(totalSleepMinutes / sleepTrackedDays)
+          : 0,
+        reflection_activity: summarizeReflectionText(entries)
+      };
     }
 
     default:
