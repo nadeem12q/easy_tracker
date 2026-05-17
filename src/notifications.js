@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { formatDateInput, formatTimeLabel, hashToInt } from "./lib.js";
+import { logReminderAction } from "./reminderApi.js";
 
 const ACTION_TYPE_ID = "habit-reminder-actions";
 const ACTION_YES = "habit_yes";
@@ -148,6 +149,15 @@ function scheduleWebReminder(habit, onNotify) {
       });
     }
 
+    logReminderAction({
+      habitId: habit.id,
+      entryDate: formatDateInput(),
+      scheduledFor: next.toISOString(),
+      action: "fired",
+      source: "web",
+      notificationId: `web-${habit.id}-${next.toISOString()}`
+    });
+
     if (typeof onNotify === "function") {
       onNotify({
         kind: "web-reminder-fired",
@@ -234,6 +244,20 @@ export async function syncHabitReminderNotifications(habits, options = {}) {
 
     await LocalNotifications.schedule({ notifications });
 
+    activeHabits.forEach((habit) => {
+      normalizeRepeatDays(habit.reminder_repeat_days).forEach((day) => {
+        logReminderAction({
+          habitId: habit.id,
+          entryDate: formatDateInput(),
+          scheduledFor: null,
+          action: "scheduled",
+          source: "android",
+          notificationId: String(getReminderId(habit.id, day)),
+          detail: { repeat_day: day, reminder_time: habit.reminder_time }
+        });
+      });
+    });
+
     options.onScheduled?.({
       kind: "native-reminders-scheduled",
       count: notifications.length,
@@ -262,16 +286,18 @@ export async function scheduleLaterReminder(habit, minutes) {
     }
 
     const LocalNotifications = await getLocalNotifications();
+    const notificationId = getLaterReminderId(habit.id, formatDateInput());
+    const scheduledAt = new Date(Date.now() + delayMinutes * 60 * 1000);
     await LocalNotifications.schedule({
       notifications: [
         {
-          id: getLaterReminderId(habit.id, formatDateInput()),
+          id: notificationId,
           title: `Reminder: ${habit.name}`,
           body: buildReminderBody(habit),
           actionTypeId: ACTION_TYPE_ID,
           channelId: REMINDER_CHANNEL_ID,
           schedule: {
-            at: new Date(Date.now() + delayMinutes * 60 * 1000),
+            at: scheduledAt,
             allowWhileIdle: true
           },
           extra: {
@@ -283,9 +309,28 @@ export async function scheduleLaterReminder(habit, minutes) {
         }
       ]
     });
+
+    await logReminderAction({
+      habitId: habit.id,
+      entryDate: formatDateInput(),
+      scheduledFor: scheduledAt.toISOString(),
+      action: "later",
+      source: "android",
+      snoozeMinutes: delayMinutes,
+      notificationId: String(notificationId)
+    });
+
     return { available: true, permission: ready.permission };
   }
 
+  await logReminderAction({
+    habitId: habit.id,
+    entryDate: formatDateInput(),
+    scheduledFor: new Date(Date.now() + delayMinutes * 60 * 1000).toISOString(),
+    action: "later",
+    source: "web",
+    snoozeMinutes: delayMinutes
+  });
   return { available: true, permission: "granted" };
 }
 
@@ -321,11 +366,28 @@ export async function registerReminderActionListener(onAction) {
 
   await ensureNativeNotificationsReady();
 
-  LocalNotifications.addListener("localNotificationActionPerformed", (event) => {
+  LocalNotifications.addListener("localNotificationActionPerformed", async (event) => {
     const extra = event.notification.extra ?? event.notification.data ?? {};
     if (!extra?.habitId) {
       return;
     }
+
+    const actionMap = {
+      [ACTION_YES]: "yes",
+      [ACTION_NO]: "no",
+      [ACTION_LATER]: "later"
+    };
+
+    await logReminderAction({
+      habitId: extra.habitId,
+      entryDate: formatDateInput(),
+      scheduledFor: event.notification.schedule?.at?.toISOString?.() ?? null,
+      action: actionMap[event.actionId] ?? "fired",
+      source: extra.kind ?? "android",
+      snoozeMinutes: Number(extra.snoozeMinutes || 30),
+      notificationId: String(event.notification.id ?? ""),
+      detail: { action_id: event.actionId, repeat_day: extra.repeatDay }
+    });
 
     onAction?.({
       actionId: event.actionId,
