@@ -60,6 +60,8 @@ npm run preview
 2. `supabase/schema.sql` project database par run karein
 3. Frontend `.env` values set karein
 
+Is schema mein signup ke baad default habits backend level par auto-seed ho jati hain.
+
 ## Android app
 
 ```bash
@@ -90,5 +92,7 @@ npm run mcp
 - `set_sleep`
 - `set_mood`
 - `weekly_summary`
+- `habit_consistency_report`
+- `reflection_pattern_report`
 
 Yeh structure is liye rakha gaya hai taake user kisi bhi LLM ya agent ko MCP attach karke tracker ko natural language mein update karwa sake.
