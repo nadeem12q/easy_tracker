@@ -1,0 +1,110 @@
+.security-mount-shell {
+  padding-top: 0;
+}
+
+.security-mount-panel {
+  margin-top: 0;
+}
+
+.security-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.security-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.security-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 58, 38, 0.1);
+  background: rgba(255, 255, 255, 0.42);
+  font-weight: 700;
+}
+
+.scope-toggle input {
+  width: auto;
+}
+
+.scope-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.scope-badge {
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(78, 58, 38, 0.12);
+  color: #78675a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.scope-badge.active {
+  background: rgba(47, 37, 29, 0.9);
+  color: #fff9f0;
+}
+
+.audit-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.audit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(78, 58, 38, 0.1);
+}
+
+.audit-row.success {
+  border-color: rgba(40, 91, 53, 0.16);
+}
+
+.audit-row.error {
+  border-color: rgba(155, 76, 69, 0.22);
+  background: rgba(200, 100, 89, 0.08);
+}
+
+@media (max-width: 720px) {
+  .scope-grid,
+  .audit-row {
+    grid-template-columns: 1fr;
+  }
+
+  .scope-grid {
+    display: grid;
+  }
+
+  .audit-row {
+    display: grid;
+    align-items: start;
+  }
+}
