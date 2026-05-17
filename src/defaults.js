@@ -16,6 +16,16 @@ export const DEFAULT_HABITS = [
   { name: "Journalizing", color: "var(--peach)", category: "reflection", is_binary: true }
 ];
 
+export const DEFAULT_HABIT_SEED = DEFAULT_HABITS.map((habit, index) => ({
+  ...habit,
+  slug: habit.name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, ""),
+  position: index
+}));
+
 export const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
 export const MOOD_OPTIONS = [
