@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "android:init": "npx cap add android",
-    "android:sync": "npx cap sync android",
+    "android:permissions": "node scripts/ensure-android-reminder-permissions.mjs",
+    "android:init": "npx cap add android && npm run android:permissions",
+    "android:sync": "npm run android:permissions && npx cap sync android",
     "android:open": "npx cap open android",
     "android:build": "npm run build && npm run android:sync",
     "mcp": "node mcp-server/index.js"
