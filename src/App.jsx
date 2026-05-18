@@ -23,6 +23,7 @@ import {
   clearHabitReminderNotifications,
   describeReminder,
   ensureReminderPermissions,
+  registerReminderAppStateListener,
   registerReminderActionListener,
   reminderActionIds,
   scheduleLaterReminder,
@@ -194,6 +195,11 @@ export default function App() {
   });
   const longPressTimerRef = useRef(null);
   const longPressLockRef = useRef("");
+  const habitsRef = useRef([]);
+  const dateRef = useRef(date);
+  const pendingEntryPatchRef = useRef({});
+  const pendingEntryDateRef = useRef(date);
+  const saveTimeoutRef = useRef(null);
 
   const weekday = useMemo(() => weekdayFromDate(date), [date]);
   const sleepDuration = useMemo(
@@ -251,8 +257,16 @@ export default function App() {
   }, [session?.user]);
 
   useEffect(() => {
+    habitsRef.current = habits;
+  }, [habits]);
+
+  useEffect(() => {
+    dateRef.current = date;
+  }, [date]);
+
+  useEffect(() => {
     registerReminderActionListener(async (action) => {
-      const habit = habits.find((item) => item.id === action.habitId);
+      const habit = habitsRef.current.find((item) => item.id === action.habitId);
       if (!habit) {
         return;
       }
@@ -283,7 +297,15 @@ export default function App() {
         setFeedback({ type: "error", message: error.message });
       }
     });
-  }, [habits]);
+  }, []);
+
+  useEffect(() => {
+    registerReminderAppStateListener(() => {
+      syncHabitReminderNotifications(habitsRef.current).catch((error) => {
+        setFeedback({ type: "error", message: error.message });
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (!habits.length) {
@@ -295,18 +317,78 @@ export default function App() {
     });
   }, [habits]);
 
-  async function persist(patch) {
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  async function persistNow(targetDate, patch, options = {}) {
     setSaving(true);
 
     try {
-      const nextEntry = await saveEntryFields(date, patch);
+      const nextEntry = await saveEntryFields(targetDate, patch);
       setEntry(nextEntry);
-      setFeedback({ type: "success", message: "Aaj ka tracker save ho gaya." });
+      if (options.successMessage) {
+        setFeedback({ type: "success", message: options.successMessage });
+      }
     } catch (error) {
       setFeedback({ type: "error", message: error.message });
     } finally {
       setSaving(false);
     }
+  }
+
+  async function flushPendingEntrySave() {
+    const patch = pendingEntryPatchRef.current;
+    const targetDate = pendingEntryDateRef.current;
+
+    if (!Object.keys(patch).length) {
+      return;
+    }
+
+    pendingEntryPatchRef.current = {};
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    await persistNow(targetDate, patch);
+  }
+
+  function persist(patch, options = {}) {
+    const immediate = options.immediate ?? true;
+
+    setEntry((current) => ({ ...current, ...patch }));
+
+    if (immediate) {
+      const mergedPatch = {
+        ...pendingEntryPatchRef.current,
+        ...patch
+      };
+      pendingEntryPatchRef.current = {};
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      return persistNow(dateRef.current, mergedPatch, options);
+    }
+
+    pendingEntryDateRef.current = dateRef.current;
+    pendingEntryPatchRef.current = {
+      ...pendingEntryPatchRef.current,
+      ...patch
+    };
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      flushPendingEntrySave();
+    }, options.delayMs ?? 600);
   }
 
   async function handleAuthSubmit(event) {
@@ -373,8 +455,14 @@ export default function App() {
   }
 
   async function handleLogout() {
+    await flushPendingEntrySave();
     await signOut();
     await load(date);
+  }
+
+  async function handleDateChange(nextDate) {
+    await flushPendingEntrySave();
+    setDate(nextDate);
   }
 
   function clearLongPressTimer() {
@@ -414,11 +502,15 @@ export default function App() {
 
     setReminderBusy(true);
     try {
+      let exactNeedsAttention = false;
+
       if (reminderEditor.reminder_enabled) {
         const permission = await ensureReminderPermissions();
         if (!permission.available) {
           throw new Error("Notification permission grant kiye baghair reminder enable nahin ho sakta.");
         }
+
+        exactNeedsAttention = permission.exact?.exact === false;
       }
 
       const updated = await updateHabitReminder(reminderEditor.id, {
@@ -431,7 +523,12 @@ export default function App() {
       setHabits((current) =>
         current.map((habit) => (habit.id === updated.id ? { ...habit, ...updated } : habit))
       );
-      setFeedback({ type: "success", message: `${updated.name} ka reminder save ho gaya.` });
+      setFeedback({
+        type: exactNeedsAttention ? "error" : "success",
+        message: exactNeedsAttention
+          ? `${updated.name} ka reminder save ho gaya. Android exact alarm setting bhi allow kar dein aur app dobara khol kar check karein.`
+          : `${updated.name} ka reminder save ho gaya.`
+      });
       longPressLockRef.current = "";
       setReminderEditor(null);
     } catch (error) {
@@ -521,7 +618,7 @@ export default function App() {
         <aside className="hero-panel">
           <div className="panel-row">
             <Field label="Date">
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <input type="date" value={date} onChange={(event) => handleDateChange(event.target.value)} />
             </Field>
 
             <div>
@@ -755,7 +852,9 @@ export default function App() {
                 type="text"
                 placeholder="2h 10m"
                 value={entry.screen_time ?? ""}
-                onChange={(event) => persist({ screen_time: event.target.value })}
+                onChange={(event) =>
+                  persist({ screen_time: event.target.value }, { immediate: false })
+                }
               />
             </Field>
           </div>
@@ -767,7 +866,9 @@ export default function App() {
             <textarea
               value={entry.sleep_quality_note ?? ""}
               placeholder="Agar quality ke saath koi note likhna ho to yahan likhein..."
-              onChange={(event) => persist({ sleep_quality_note: event.target.value })}
+              onChange={(event) =>
+                persist({ sleep_quality_note: event.target.value }, { immediate: false })
+              }
             />
           </div>
 
@@ -865,7 +966,7 @@ export default function App() {
               <textarea
                 value={entry.best_moment ?? ""}
                 placeholder="Jo acha hua, jo yaad rakhna hai, sab yahan likh sakte hain..."
-                onChange={(event) => persist({ best_moment: event.target.value })}
+                onChange={(event) => persist({ best_moment: event.target.value }, { immediate: false })}
               />
             </div>
 
@@ -874,7 +975,9 @@ export default function App() {
               <textarea
                 value={entry.improved_today ?? ""}
                 placeholder="Aaj kya behtar ho sakta tha?"
-                onChange={(event) => persist({ improved_today: event.target.value })}
+                onChange={(event) =>
+                  persist({ improved_today: event.target.value }, { immediate: false })
+                }
               />
             </div>
 
@@ -883,7 +986,7 @@ export default function App() {
               <textarea
                 value={entry.gratitude ?? ""}
                 placeholder="Jitna chahein utna likhein..."
-                onChange={(event) => persist({ gratitude: event.target.value })}
+                onChange={(event) => persist({ gratitude: event.target.value }, { immediate: false })}
               />
             </div>
 
@@ -892,7 +995,7 @@ export default function App() {
               <textarea
                 value={entry.review ?? ""}
                 placeholder="Aaj ke din ka review..."
-                onChange={(event) => persist({ review: event.target.value })}
+                onChange={(event) => persist({ review: event.target.value }, { immediate: false })}
               />
             </div>
 
@@ -902,7 +1005,9 @@ export default function App() {
                 <textarea
                   value={entry.goals_achieved ?? ""}
                   placeholder="Kya complete hua?"
-                  onChange={(event) => persist({ goals_achieved: event.target.value })}
+                  onChange={(event) =>
+                    persist({ goals_achieved: event.target.value }, { immediate: false })
+                  }
                 />
               </div>
 
@@ -911,7 +1016,9 @@ export default function App() {
                 <textarea
                   value={entry.still_working_on ?? ""}
                   placeholder="Kis cheez par kaam jari hai?"
-                  onChange={(event) => persist({ still_working_on: event.target.value })}
+                  onChange={(event) =>
+                    persist({ still_working_on: event.target.value }, { immediate: false })
+                  }
                 />
               </div>
 
@@ -920,7 +1027,9 @@ export default function App() {
                 <textarea
                   value={entry.focus_for_tomorrow ?? ""}
                   placeholder="Kal ka main focus..."
-                  onChange={(event) => persist({ focus_for_tomorrow: event.target.value })}
+                  onChange={(event) =>
+                    persist({ focus_for_tomorrow: event.target.value }, { immediate: false })
+                  }
                 />
               </div>
             </div>
@@ -952,7 +1061,9 @@ export default function App() {
                 <textarea
                   value={entry.intentions_for_tomorrow ?? ""}
                   placeholder="Kal kis niyyat ke saath start karna hai?"
-                  onChange={(event) => persist({ intentions_for_tomorrow: event.target.value })}
+                  onChange={(event) =>
+                    persist({ intentions_for_tomorrow: event.target.value }, { immediate: false })
+                  }
                 />
               </div>
             </div>
