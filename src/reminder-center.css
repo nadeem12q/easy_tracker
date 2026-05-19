@@ -2,62 +2,21 @@
   padding-top: 0;
 }
 
+.reminder-center-shell.embedded {
+  width: 100%;
+  margin: 0;
+}
+
 .reminder-center-panel {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .reminder-center-header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.reminder-center-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 3vw, 3rem);
-  line-height: 0.95;
+  align-items: center;
 }
 
 .reminder-habit-list {
   display: grid;
-  gap: 10px;
-}
-
-.reminder-habit-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(78, 58, 38, 0.1);
-}
-
-.repeat-day-actions,
-.repeat-day-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.reminder-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-
-@media (max-width: 900px) {
-  .reminder-center-header,
-  .reminder-habit-row {
-    display: grid;
-  }
-
-  .reminder-stats-grid {
-    grid-template-columns: 1fr;
-  }
+  gap: 8px;
 }

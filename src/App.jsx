@@ -1,13 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
+  AlarmClock,
+  ArrowLeft,
+  Bell,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Circle,
+  Heart,
+  Home,
+  Lock,
+  LogOut,
+  Moon,
+  Plus,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  User,
+  X
+} from "lucide-react";
+import {
   archiveHabit,
-  createMcpToken,
   createHabit,
   ensureDefaultHabits,
   getDailyState,
   getSession,
-  listMcpTokens,
-  revokeMcpToken,
   saveEntryFields,
   setHabitStatus,
   signIn,
@@ -18,51 +38,177 @@ import {
   updateHabitReminder
 } from "./api.js";
 import { DAY_RATING_STARS, MOOD_OPTIONS, QUALITY_STARS, WEEKDAY_LABELS } from "./defaults.js";
-import { calculateSleepDuration, formatDateInput, weekdayFromDate } from "./lib.js";
+import { calculateSleepDuration, formatDateInput, normalizeRepeatDays, weekdayFromDate } from "./lib.js";
 import {
   clearHabitReminderNotifications,
   describeReminder,
   ensureReminderPermissions,
-  registerReminderAppStateListener,
   registerReminderActionListener,
+  registerReminderAppStateListener,
   reminderActionIds,
   scheduleLaterReminder,
   syncHabitReminderNotifications
 } from "./notifications.js";
+import ReminderCenter from "./ReminderCenter.jsx";
+import SecurityPanel from "./SecurityPanel.jsx";
 import { hasSupabaseConfig } from "./supabase.js";
+
+const APP_SETTINGS_KEY = "metrack-app-settings-v1";
+
+const DEFAULT_APP_SETTINGS = {
+  languageMode: "mixed",
+  todayFocus: "habits"
+};
+
+const HELP_TEXT = {
+  mixed: {
+    preview:
+      "Preview mode mein app dekh sakte hain. Permanent sync ke liye account create ya login karein.",
+    account:
+      "Aap ka data account ke saath sync ho raha hai. More screen mein reminders aur security settings milengi.",
+    authIntro:
+      "Account se tracker save hota hai aur Android app mein reminders zyada reliable ho jate hain.",
+    noSecurity: "Security tools ke liye signed-in account zaroori hai.",
+    noReminderTime: "Reminder enable karne ke liye time zaroori hai.",
+    permission: "Notification permission allow karein, phir reminder enable hoga.",
+    loginSuccess: "Login ho gaya.",
+    signupSuccess: "Account create ho gaya.",
+    signupVerify: "Account create ho gaya. Email verify karke phir login karein.",
+    reminderSaved: "Reminder save ho gaya.",
+    reminderExact:
+      "Reminder save ho gaya. Android exact alarm setting bhi allow kar dein aur app dobara khol kar check karein.",
+    habitDone: "done mark ho gayi.",
+    habitNotDone: "abhi not done par set ho gayi.",
+    snoozed: "minutes baad dobara aayega.",
+    settingsSaved: "Settings save ho gayi."
+  },
+  english: {
+    preview: "Preview mode lets you explore the app. Create or sign in to sync permanently.",
+    account: "Your tracker is syncing with your account. Reminders and security live in More.",
+    authIntro: "An account saves your tracker and makes Android reminders more reliable.",
+    noSecurity: "Sign in to use security tools.",
+    noReminderTime: "Choose a time before enabling this reminder.",
+    permission: "Allow notification permission before enabling reminders.",
+    loginSuccess: "You are signed in.",
+    signupSuccess: "Account created.",
+    signupVerify: "Account created. Verify your email, then sign in.",
+    reminderSaved: "Reminder saved.",
+    reminderExact:
+      "Reminder saved. Also allow Android exact alarm access, then reopen the app to confirm.",
+    habitDone: "marked done.",
+    habitNotDone: "marked not done.",
+    snoozed: "will remind you again in a few minutes.",
+    settingsSaved: "Settings saved."
+  }
+};
+
+const MOOD_ICONS = {
+  happy: Sparkles,
+  confident: ShieldCheck,
+  calm: Heart,
+  angry: Activity,
+  sad: Moon,
+  insecure: Circle
+};
 
 function cx(...parts) {
   return parts.filter(Boolean).join(" ");
 }
 
-function SectionTitle({ text, emoji }) {
-  return (
-    <h3 className="sheet-title">
-      {text} {emoji ? emoji : ""}
-    </h3>
-  );
+function loadAppSettings() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(APP_SETTINGS_KEY) ?? "{}");
+    return { ...DEFAULT_APP_SETTINGS, ...saved };
+  } catch {
+    return DEFAULT_APP_SETTINGS;
+  }
 }
 
-function Field({ label, children }) {
+function formatDateLabel(dateText) {
+  return new Date(`${dateText}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function Field({ label, children, className }) {
   return (
-    <label>
+    <label className={cx("field", className)}>
       <span className="field-label">{label}</span>
       {children}
     </label>
   );
 }
 
+function IconButton({ label, icon: Icon, className, ...props }) {
+  return (
+    <button type="button" className={cx("icon-button", className)} aria-label={label} title={label} {...props}>
+      <Icon size={20} aria-hidden="true" />
+    </button>
+  );
+}
+
+function SectionHeader({ eyebrow, title, action }) {
+  return (
+    <div className="section-header">
+      <div>
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <h2>{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function SegmentedControl({ value, options, onChange }) {
+  return (
+    <div className="segmented-control">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={cx(value === option.value && "active")}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function StarSelector({ value, onPick }) {
   return (
-    <div className="star-row">
+    <div className="rating-row">
       {QUALITY_STARS.map((star) => (
         <button
           key={star}
           type="button"
-          className={cx("star-chip", value === star && "active")}
+          className={cx("rating-button", value === star && "active")}
           onClick={() => onPick(star)}
+          aria-label={`${star} stars`}
         >
-          {star} Star{star > 1 ? "s" : ""}
+          <Star size={18} fill={value >= star ? "currentColor" : "none"} />
+          <span>{star}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DayRatingSelector({ value, onPick }) {
+  return (
+    <div className="rating-row">
+      {DAY_RATING_STARS.map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={cx("rating-button", value === star && "active")}
+          onClick={() => onPick(star)}
+          aria-label={`${star} star day`}
+        >
+          <Star size={18} fill={value >= star ? "currentColor" : "none"} />
         </button>
       ))}
     </div>
@@ -71,22 +217,37 @@ function StarSelector({ value, onPick }) {
 
 function MoodSelector({ value, onPick }) {
   return (
-    <div className="mood-row">
-      {MOOD_OPTIONS.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          className={cx("mood-chip", value === item.key && "active")}
-          onClick={() => onPick(item.key)}
-        >
-          {item.emoji} {item.label}
-        </button>
-      ))}
+    <div className="mood-grid">
+      {MOOD_OPTIONS.map((item) => {
+        const Icon = MOOD_ICONS[item.key] ?? Circle;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={cx("mood-card", value === item.key && "active")}
+            onClick={() => onPick(item.key)}
+          >
+            <Icon size={20} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
+function ReminderDialog({ value, onChange, onClose, onSave, busy, copy }) {
+  function toggleRepeatDay(day) {
+    onChange((current) => {
+      const currentDays = normalizeRepeatDays(current.reminder_repeat_days);
+      const nextDays = currentDays.includes(day)
+        ? currentDays.filter((item) => item !== day)
+        : [...currentDays, day].sort((a, b) => a - b);
+
+      return { ...current, reminder_repeat_days: nextDays.length ? nextDays : currentDays };
+    });
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-sheet" onClick={(event) => event.stopPropagation()}>
@@ -95,9 +256,7 @@ function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
             <p className="eyebrow">Reminder</p>
             <h3 className="modal-title">{value.name}</h3>
           </div>
-          <button type="button" className="action secondary" onClick={onClose}>
-            Close
-          </button>
+          <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
 
         <label className="switch-row">
@@ -108,14 +267,14 @@ function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
               onChange((current) => ({ ...current, reminder_enabled: event.target.checked }))
             }
           />
-          <div>
-            <strong>Daily reminder enable karein</strong>
-            <div className="subtle-note">Default off hai. User khud on karega.</div>
-          </div>
+          <span>
+            <strong>Enable reminder</strong>
+            <small>{copy.permission}</small>
+          </span>
         </label>
 
-        <div className="panel-row">
-          <Field label="Reminder Time">
+        <div className="form-grid">
+          <Field label="Time">
             <input
               type="time"
               disabled={!value.reminder_enabled}
@@ -126,7 +285,7 @@ function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
             />
           </Field>
 
-          <Field label="Later Minutes">
+          <Field label="Later minutes">
             <input
               type="number"
               min="5"
@@ -143,27 +302,42 @@ function ReminderDialog({ value, onChange, onClose, onSave, busy }) {
           </Field>
         </div>
 
-        <Field label="Custom Reminder Text">
+        <div className="field">
+          <span className="field-label">Repeat days</span>
+          <div className="weekday-strip">
+            {WEEKDAY_LABELS.map((label, index) => (
+              <button
+                key={`${label}_${index}_reminder`}
+                type="button"
+                disabled={!value.reminder_enabled}
+                className={cx(
+                  "weekday-chip",
+                  normalizeRepeatDays(value.reminder_repeat_days).includes(index) && "active"
+                )}
+                onClick={() => toggleRepeatDay(index)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Custom text">
           <textarea
             disabled={!value.reminder_enabled}
             value={value.reminder_message}
-            placeholder="Misal: Fajar ka waqt ho gaya. Kya aap ne ye habit kar li hai?"
+            placeholder="Example: Time to check this habit."
             onChange={(event) =>
               onChange((current) => ({ ...current, reminder_message: event.target.value }))
             }
           />
         </Field>
 
-        <div className="auth-note">
-          Notification mein teen actions honge: <strong>Yes</strong>, <strong>No</strong>, aur{" "}
-          <strong>Later</strong>. Android app mein yeh zyada strong tareeqay se kaam karega.
-        </div>
-
-        <div className="toolbar">
-          <button type="button" className="action" onClick={onSave} disabled={busy}>
-            {busy ? "Saving..." : "Save Reminder"}
+        <div className="button-row">
+          <button type="button" className="primary-button" onClick={onSave} disabled={busy}>
+            {busy ? "Saving..." : "Save reminder"}
           </button>
-          <button type="button" className="action secondary" onClick={onClose} disabled={busy}>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
         </div>
@@ -184,15 +358,13 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ email: "", password: "" });
   const [newHabit, setNewHabit] = useState("");
   const [feedback, setFeedback] = useState(null);
-  const [mcpTokens, setMcpTokens] = useState([]);
-  const [tokenLabel, setTokenLabel] = useState("Primary Agent");
-  const [createdToken, setCreatedToken] = useState("");
-  const [tokenBusy, setTokenBusy] = useState(false);
   const [reminderEditor, setReminderEditor] = useState(null);
   const [reminderBusy, setReminderBusy] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return window.localStorage.getItem("metrack-welcome-dismissed") !== "yes";
-  });
+  const [activeTab, setActiveTab] = useState("today");
+  const [profileView, setProfileView] = useState("home");
+  const [morePanel, setMorePanel] = useState("settings");
+  const [settings, setSettings] = useState(loadAppSettings);
+
   const longPressTimerRef = useRef(null);
   const longPressLockRef = useRef("");
   const habitsRef = useRef([]);
@@ -201,10 +373,20 @@ export default function App() {
   const pendingEntryDateRef = useRef(date);
   const saveTimeoutRef = useRef(null);
 
+  const copy = HELP_TEXT[settings.languageMode] ?? HELP_TEXT.mixed;
   const weekday = useMemo(() => weekdayFromDate(date), [date]);
   const sleepDuration = useMemo(
     () => calculateSleepDuration(entry?.sleep_time, entry?.wake_time).label,
     [entry?.sleep_time, entry?.wake_time]
+  );
+  const doneCount = useMemo(
+    () => habits.filter((habit) => habitLog[habit.id]).length,
+    [habits, habitLog]
+  );
+  const progress = habits.length ? Math.round((doneCount / habits.length) * 100) : 0;
+  const prayerHabits = useMemo(
+    () => habits.filter((habit) => habit.category === "spiritual"),
+    [habits]
   );
 
   const load = useCallback(async (targetDate) => {
@@ -243,20 +425,6 @@ export default function App() {
   }, [date, load]);
 
   useEffect(() => {
-    if (!session?.user) {
-      setMcpTokens([]);
-      setCreatedToken("");
-      return;
-    }
-
-    listMcpTokens()
-      .then(setMcpTokens)
-      .catch((error) => {
-        setFeedback({ type: "error", message: error.message });
-      });
-  }, [session?.user]);
-
-  useEffect(() => {
     habitsRef.current = habits;
   }, [habits]);
 
@@ -265,24 +433,26 @@ export default function App() {
   }, [date]);
 
   useEffect(() => {
+    window.localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+  }, [settings]);
+
+  useEffect(() => {
     registerReminderActionListener(async (action) => {
       const habit = habitsRef.current.find((item) => item.id === action.habitId);
-      if (!habit) {
-        return;
-      }
+      if (!habit) return;
 
       try {
         if (action.actionId === reminderActionIds.yes) {
           await setHabitStatus(action.entryDate, action.habitId, true);
           setHabitLog((current) => ({ ...current, [action.habitId]: true }));
-          setFeedback({ type: "success", message: `${habit.name} done mark ho gayi.` });
+          setFeedback({ type: "success", message: `${habit.name} ${copy.habitDone}` });
           return;
         }
 
         if (action.actionId === reminderActionIds.no) {
           await setHabitStatus(action.entryDate, action.habitId, false);
           setHabitLog((current) => ({ ...current, [action.habitId]: false }));
-          setFeedback({ type: "success", message: `${habit.name} abhi not done par set ho gayi.` });
+          setFeedback({ type: "success", message: `${habit.name} ${copy.habitNotDone}` });
           return;
         }
 
@@ -290,14 +460,14 @@ export default function App() {
           await scheduleLaterReminder(habit, action.snoozeMinutes);
           setFeedback({
             type: "success",
-            message: `${habit.name} ka reminder ${action.snoozeMinutes} minutes baad dobara aayega.`
+            message: `${habit.name} ${action.snoozeMinutes} ${copy.snoozed}`
           });
         }
       } catch (error) {
         setFeedback({ type: "error", message: error.message });
       }
     });
-  }, []);
+  }, [copy.habitDone, copy.habitNotDone, copy.snoozed]);
 
   useEffect(() => {
     registerReminderAppStateListener(() => {
@@ -308,9 +478,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!habits.length) {
-      return;
-    }
+    if (!habits.length) return;
 
     syncHabitReminderNotifications(habits).catch((error) => {
       setFeedback({ type: "error", message: error.message });
@@ -345,9 +513,7 @@ export default function App() {
     const patch = pendingEntryPatchRef.current;
     const targetDate = pendingEntryDateRef.current;
 
-    if (!Object.keys(patch).length) {
-      return;
-    }
+    if (!Object.keys(patch).length) return;
 
     pendingEntryPatchRef.current = {};
     if (saveTimeoutRef.current) {
@@ -397,17 +563,14 @@ export default function App() {
     try {
       if (authMode === "signin") {
         await signIn(authForm.email, authForm.password);
-        setFeedback({ type: "success", message: "Login ho gaya." });
+        setFeedback({ type: "success", message: copy.loginSuccess });
       } else {
         const result = await signUp(authForm.email, authForm.password);
         if (result.needsEmailVerification) {
-          setFeedback({
-            type: "success",
-            message: "Account create ho gaya. Email verify karke phir login karein."
-          });
+          setFeedback({ type: "success", message: copy.signupVerify });
           return;
         }
-        setFeedback({ type: "success", message: "Account create ho gaya." });
+        setFeedback({ type: "success", message: copy.signupSuccess });
       }
 
       await load(date);
@@ -480,7 +643,8 @@ export default function App() {
       reminder_enabled: Boolean(habit.reminder_enabled),
       reminder_time: habit.reminder_time ?? "",
       reminder_message: habit.reminder_message ?? "",
-      reminder_snooze_minutes: Number(habit.reminder_snooze_minutes ?? 30)
+      reminder_snooze_minutes: Number(habit.reminder_snooze_minutes ?? 30),
+      reminder_repeat_days: normalizeRepeatDays(habit.reminder_repeat_days)
     });
   }
 
@@ -496,7 +660,7 @@ export default function App() {
     if (!reminderEditor) return;
 
     if (reminderEditor.reminder_enabled && !reminderEditor.reminder_time) {
-      setFeedback({ type: "error", message: "Reminder enable karne ke liye time zaroori hai." });
+      setFeedback({ type: "error", message: copy.noReminderTime });
       return;
     }
 
@@ -507,7 +671,7 @@ export default function App() {
       if (reminderEditor.reminder_enabled) {
         const permission = await ensureReminderPermissions();
         if (!permission.available) {
-          throw new Error("Notification permission grant kiye baghair reminder enable nahin ho sakta.");
+          throw new Error(copy.permission);
         }
 
         exactNeedsAttention = permission.exact?.exact === false;
@@ -517,7 +681,8 @@ export default function App() {
         reminder_enabled: reminderEditor.reminder_enabled,
         reminder_time: reminderEditor.reminder_time,
         reminder_message: reminderEditor.reminder_message.trim(),
-        reminder_snooze_minutes: Number(reminderEditor.reminder_snooze_minutes || 30)
+        reminder_snooze_minutes: Number(reminderEditor.reminder_snooze_minutes || 30),
+        reminder_repeat_days: normalizeRepeatDays(reminderEditor.reminder_repeat_days)
       });
 
       setHabits((current) =>
@@ -525,9 +690,7 @@ export default function App() {
       );
       setFeedback({
         type: exactNeedsAttention ? "error" : "success",
-        message: exactNeedsAttention
-          ? `${updated.name} ka reminder save ho gaya. Android exact alarm setting bhi allow kar dein aur app dobara khol kar check karein.`
-          : `${updated.name} ka reminder save ho gaya.`
+        message: exactNeedsAttention ? copy.reminderExact : `${updated.name} ${copy.reminderSaved}`
       });
       longPressLockRef.current = "";
       setReminderEditor(null);
@@ -538,298 +701,134 @@ export default function App() {
     }
   }
 
-  async function handleCreateToken() {
-    const trimmed = tokenLabel.trim();
-    if (!trimmed) return;
-
-    setTokenBusy(true);
-    try {
-      const created = await createMcpToken({ label: trimmed });
-      setCreatedToken(created.token);
-      setMcpTokens((current) => [created.record, ...current]);
-      setFeedback({
-        type: "success",
-        message: "Naya MCP token generate ho gaya. Isay sirf trusted agent ke saath use karein."
-      });
-    } catch (error) {
-      setFeedback({ type: "error", message: error.message });
-    } finally {
-      setTokenBusy(false);
-    }
+  function openMore(panel = "settings") {
+    setProfileView("more");
+    setMorePanel(panel);
+    setActiveTab("profile");
   }
 
-  async function handleRevokeToken(tokenId) {
-    setTokenBusy(true);
-    try {
-      await revokeMcpToken(tokenId);
-      setMcpTokens((current) => current.filter((item) => item.id !== tokenId));
-      setFeedback({ type: "success", message: "MCP token revoke kar diya gaya." });
-    } catch (error) {
-      setFeedback({ type: "error", message: error.message });
-    } finally {
-      setTokenBusy(false);
+  function renderHabitCards(items = habits, compact = false) {
+    if (!items.length) {
+      return <div className="empty-state">No habits yet.</div>;
     }
-  }
 
-  function dismissWelcome(mode = "preview") {
-    if (mode === "preview") {
-      window.localStorage.setItem("metrack-welcome-dismissed", "yes");
-    }
-    setShowWelcome(false);
-  }
-
-  if (loading || !entry) {
     return (
-      <main className="app-shell">
-        <div className="pill">Loading MeTrack...</div>
-      </main>
+      <div className={cx("habit-list", compact && "compact")}>
+        {items.map((habit) => {
+          const done = Boolean(habitLog[habit.id]);
+          return (
+            <article
+              key={habit.id}
+              className={cx("habit-item", done && "done")}
+              onPointerDown={(event) => {
+                if (event.pointerType === "touch") {
+                  startHabitLongPress(habit);
+                }
+              }}
+              onPointerUp={clearLongPressTimer}
+              onPointerCancel={clearLongPressTimer}
+              onPointerLeave={clearLongPressTimer}
+            >
+              <button
+                type="button"
+                className="habit-check"
+                onClick={() => {
+                  if (longPressLockRef.current === habit.id) {
+                    longPressLockRef.current = "";
+                    return;
+                  }
+                  handleToggleHabit(habit.id);
+                }}
+                aria-label={`Toggle ${habit.name}`}
+              >
+                {done ? <Check size={22} /> : <Circle size={22} />}
+              </button>
+              <div className="habit-content">
+                <strong>{habit.name}</strong>
+                <span>{habit.category || "habit"} · {describeReminder(habit)}</span>
+              </div>
+              <IconButton label={`Reminder for ${habit.name}`} icon={Bell} onClick={() => openReminderEditor(habit)} />
+              <IconButton label={`Remove ${habit.name}`} icon={X} onClick={() => handleArchiveHabit(habit.id)} />
+            </article>
+          );
+        })}
+      </div>
     );
   }
 
-  return (
-    <main className="app-shell">
-      <section className="hero">
-        <div className="title-stack">
-          <p className="eyebrow">Daily</p>
-          <h1 className="display-title">Routine Tracker</h1>
-          <p className="hero-copy">
-            MeTrack aap ke printed tracker ki clean feel ko digital form mein rakhta hai. Daily
-            routine, reflection aur mood sab aik hi jagah, minimal aur distraction-free layout ke
-            saath.
-          </p>
+  function renderTodayFocus() {
+    if (settings.todayFocus === "prayer") {
+      return (
+        <section className="card">
+          <SectionHeader eyebrow="Focus" title="Prayer Routine" />
+          {renderHabitCards(prayerHabits.length ? prayerHabits : habits, true)}
+        </section>
+      );
+    }
 
-          <div className="toolbar">
-            <span className="pill">{hasSupabaseConfig ? "Supabase Connected" : "Env Pending"}</span>
-            <span className="pill">{session?.user ? "Account Mode" : "Preview Mode"}</span>
-            <span className="pill">
-              {sleepDuration ? `Sleep: ${sleepDuration}` : "Sleep duration auto-calc ready"}
-            </span>
-            <span className="pill">{saving ? "Saving..." : "Auto-save available"}</span>
-          </div>
-
-          {!session?.user ? (
-            <div className="guest-note">
-              <strong>Preview mode:</strong> app khul jati hai, lekin permanent sync aur MCP-based
-              account automation ke liye login ya signup zaroori hai.
+    if (settings.todayFocus === "moodSleep") {
+      return (
+        <section className="card">
+          <SectionHeader eyebrow="Focus" title="Mood & Sleep" />
+          <div className="metric-grid">
+            <div className="metric-card sky">
+              <Moon size={20} />
+              <span>Sleep</span>
+              <strong>{sleepDuration || "Not set"}</strong>
             </div>
-          ) : null}
+            <div className="metric-card coral">
+              <Heart size={20} />
+              <span>Mood</span>
+              <strong>{entry?.mood_label || "Pick mood"}</strong>
+            </div>
+          </div>
+          <MoodSelector value={entry?.mood_key ?? ""} onPick={(value) => persist({ mood_key: value })} />
+        </section>
+      );
+    }
+
+    return (
+      <section className="card">
+        <SectionHeader
+          eyebrow="Focus"
+          title="Habit Progress"
+          action={<span className="progress-pill">{progress}%</span>}
+        />
+        <div className="progress-track" aria-label={`${progress}% complete`}>
+          <span style={{ width: `${progress}%` }} />
         </div>
-
-        <aside className="hero-panel">
-          <div className="panel-row">
-            <Field label="Date">
-              <input type="date" value={date} onChange={(event) => handleDateChange(event.target.value)} />
-            </Field>
-
-            <div>
-              <span className="field-label">Day</span>
-              <div className="weekday-strip">
-                {WEEKDAY_LABELS.map((label, index) => (
-                  <span key={`${label}_${index}`} className={cx("weekday-chip", weekday === index && "active")}>
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {session?.user ? (
-            <div className="panel-stack">
-              <div className="section-divider" />
-              <span className="field-label">Signed In</span>
-              <div className="subtle-note">{session.user.email || "Active user"}</div>
-              <div className="subtle-note">
-                Aap ka data ab aap ke account ke saath Supabase par sync ho raha hai.
-              </div>
-              <div className="toolbar">
-                <button type="button" className="action secondary" onClick={handleLogout}>
-                  Logout
-                </button>
-              </div>
-
-              <div className="section-divider" />
-              <span className="field-label">MCP Access Tokens</span>
-              <div className="subtle-note">
-                Password ki jagah ab agent access ke liye yeh tokens use karein. Token sirf aik
-                dafa poora show hota hai.
-              </div>
-              <div className="panel-row">
-                <Field label="Token Label">
-                  <input
-                    type="text"
-                    value={tokenLabel}
-                    onChange={(event) => setTokenLabel(event.target.value)}
-                    placeholder="Primary Agent"
-                  />
-                </Field>
-                <div style={{ display: "flex", alignItems: "end" }}>
-                  <button type="button" className="action" onClick={handleCreateToken} disabled={tokenBusy}>
-                    {tokenBusy ? "Working..." : "Generate Token"}
-                  </button>
-                </div>
-              </div>
-
-              {createdToken ? (
-                <div className="token-box">
-                  <strong>New Token</strong>
-                  <code>{createdToken}</code>
-                </div>
-              ) : null}
-
-              <div className="token-list">
-                {mcpTokens.length ? (
-                  mcpTokens.map((token) => (
-                    <div key={token.id} className="token-row">
-                      <div>
-                        <strong>{token.label}</strong>
-                        <div className="subtle-note">
-                          Prefix: {token.token_prefix} | Expires:{" "}
-                          {token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "n/a"}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="action secondary"
-                        onClick={() => handleRevokeToken(token.id)}
-                        disabled={tokenBusy}
-                      >
-                        Revoke
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="subtle-note">Abhi koi active MCP token nahin hai.</div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <form className="panel-stack" onSubmit={handleAuthSubmit}>
-              <div className="section-divider" />
-
-              <div className="toolbar">
-                <button
-                  type="button"
-                  className={cx("tag-button", authMode === "signin" && "active")}
-                  onClick={() => setAuthMode("signin")}
-                >
-                  Login
-                </button>
-                <button
-                  type="button"
-                  className={cx("tag-button", authMode === "signup" && "active")}
-                  onClick={() => setAuthMode("signup")}
-                >
-                  Create Account
-                </button>
-              </div>
-
-              <div className="auth-note">
-                Account banane ke baad aap ka tracker, reflections, aur habits aap ke personal
-                account mein save ho jayengi. Phir MCP server bhi isi account data ko use kar sake
-                ga.
-              </div>
-
-              <Field label="Email">
-                <input
-                  type="email"
-                  required
-                  value={authForm.email}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({ ...current, email: event.target.value }))
-                  }
-                />
-              </Field>
-
-              <Field label="Password">
-                <input
-                  type="password"
-                  required
-                  value={authForm.password}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({ ...current, password: event.target.value }))
-                  }
-                />
-              </Field>
-
-              <button type="submit" className="action">
-                {authMode === "signin" ? "Email se login" : "Email se signup"}
-              </button>
-            </form>
-          )}
-        </aside>
+        {renderHabitCards(habits, true)}
       </section>
+    );
+  }
 
-      {feedback ? (
-        <div className={cx("alert", feedback.type === "error" ? "error" : "success")}>
-          {feedback.message}
-        </div>
-      ) : null}
-
-      {showWelcome && !session?.user ? (
-        <section className="welcome-panel">
-          <div className="welcome-copy">
-            <p className="eyebrow">Start Here</p>
-            <h2 className="welcome-title">MeTrack ko do tareeqon se use kar sakte hain</h2>
-            <p className="welcome-text">
-              Preview mode mein app dekh sakte hain. Account mode mein aap ka data save hota hai,
-              default habits milti hain, aur MCP/LLM automation bhi aap ke account ke saath kaam
-              karti hai.
-            </p>
-            <div className="welcome-points">
-              <div className="welcome-point">
-                <strong>Preview:</strong> bina account app ka feel samajh lo.
-              </div>
-              <div className="welcome-point">
-                <strong>Account:</strong> personal sync, backend save, aur future cross-device use.
-              </div>
-              <div className="welcome-point">
-                <strong>MCP ready:</strong> agent ko bol kar tracker fill aur analyze karwa sakte ho.
-              </div>
-            </div>
+  function renderTodayTab() {
+    return (
+      <div className="screen-stack">
+        <section className="today-summary">
+          <div>
+            <p className="eyebrow">MeTrack</p>
+            <h1>{formatDateLabel(date)}</h1>
+            <span>{doneCount}/{habits.length} habits complete</span>
           </div>
-
-          <div className="welcome-actions">
-            <button
-              type="button"
-              className="action"
-              onClick={() => {
-                setAuthMode("signup");
-                dismissWelcome("account");
-              }}
-            >
-              Account Create Karain
-            </button>
-            <button
-              type="button"
-              className="action secondary"
-              onClick={() => {
-                setAuthMode("signin");
-                dismissWelcome("account");
-              }}
-            >
-              Mere Pas Account Hai
-            </button>
-            <button type="button" className="text-action" onClick={() => dismissWelcome("preview")}>
-              Pehle preview dekh leta hoon
-            </button>
+          <div className="summary-ring" style={{ "--progress": `${progress * 3.6}deg` }}>
+            <strong>{progress}%</strong>
           </div>
         </section>
-      ) : null}
 
-      <section className="page-grid">
-        <section className="sheet">
-          <SectionTitle text="Daily Routine" emoji="✓" />
+        {renderTodayFocus()}
 
-          <div className="inline-grid">
-            <Field label="Sleep Time">
+        <section className="card">
+          <SectionHeader eyebrow="Daily" title="Sleep & Screen" />
+          <div className="form-grid">
+            <Field label="Sleep time">
               <input
                 type="time"
                 value={entry.sleep_time ?? ""}
                 onChange={(event) => persist({ sleep_time: event.target.value })}
               />
             </Field>
-
-            <Field label="Wake-up Time">
+            <Field label="Wake time">
               <input
                 type="time"
                 value={entry.wake_time ?? ""}
@@ -837,244 +836,377 @@ export default function App() {
               />
             </Field>
           </div>
-
-          <div className="inline-grid">
+          <div className="form-grid">
             <Field label="Duration">
-              <input
-                type="text"
-                disabled
-                value={sleepDuration || "Auto-calculated after times are picked"}
-              />
+              <input type="text" disabled value={sleepDuration || "Auto"} />
             </Field>
-
-            <Field label="Screen Time">
+            <Field label="Screen time">
               <input
                 type="text"
                 placeholder="2h 10m"
                 value={entry.screen_time ?? ""}
-                onChange={(event) =>
-                  persist({ screen_time: event.target.value }, { immediate: false })
-                }
+                onChange={(event) => persist({ screen_time: event.target.value }, { immediate: false })}
               />
             </Field>
           </div>
-
-          <div className="reflection-block">
-            <h3>Sleep Quality</h3>
+          <Field label="Sleep quality">
             <StarSelector value={entry.sleep_quality ?? 0} onPick={(value) => persist({ sleep_quality: value })} />
-            <div style={{ marginTop: "12px" }} />
+          </Field>
+          <Field label="Sleep note">
             <textarea
               value={entry.sleep_quality_note ?? ""}
-              placeholder="Agar quality ke saath koi note likhna ho to yahan likhein..."
-              onChange={(event) =>
-                persist({ sleep_quality_note: event.target.value }, { immediate: false })
-              }
+              placeholder="Optional sleep note"
+              onChange={(event) => persist({ sleep_quality_note: event.target.value }, { immediate: false })}
             />
-          </div>
-
-          <div className="section-divider" />
-
-          <div className="habit-grid">
-            {habits.map((habit) => (
-              <div
-                key={habit.id}
-                className={cx("habit-card", habitLog[habit.id] && "done")}
-                style={{ background: habit.color || "var(--mint)" }}
-              >
-                <h3 className="habit-name">{habit.name}</h3>
-                <div className="habit-subtitle">{habit.category || "habit"}</div>
-                <div className="habit-reminder-note">{describeReminder(habit)}</div>
-
-                <button
-                  type="button"
-                  className={cx("habit-toggle", habitLog[habit.id] && "checked")}
-                  onClick={() => {
-                    if (longPressLockRef.current === habit.id) {
-                      longPressLockRef.current = "";
-                      return;
-                    }
-
-                    handleToggleHabit(habit.id);
-                  }}
-                  aria-label={`Toggle ${habit.name}`}
-                />
-
-                <div
-                  className="habit-card-overlay"
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    openReminderEditor(habit);
-                  }}
-                  onPointerDown={(event) => {
-                    if (event.pointerType === "touch") {
-                      startHabitLongPress(habit);
-                    }
-                  }}
-                  onPointerUp={clearLongPressTimer}
-                  onPointerCancel={clearLongPressTimer}
-                  onPointerLeave={clearLongPressTimer}
-                />
-
-                <div className="habit-card-actions">
-                  <button
-                    type="button"
-                    className="tag-button"
-                    style={{ padding: "6px 10px", fontSize: "0.82rem" }}
-                    onClick={() => openReminderEditor(habit)}
-                  >
-                    Reminder
-                  </button>
-                  <button
-                    type="button"
-                    className="tag-button"
-                    style={{ padding: "6px 10px", fontSize: "0.82rem" }}
-                    onClick={() => handleArchiveHabit(habit.id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="section-divider" />
-
-          <div className="panel-row">
-            <Field label="New Custom Habit">
-              <input
-                type="text"
-                placeholder="Example: Evening Walk"
-                value={newHabit}
-                onChange={(event) => setNewHabit(event.target.value)}
-              />
-            </Field>
-
-            <div style={{ display: "flex", alignItems: "end" }}>
-              <button type="button" className="action" onClick={handleAddHabit}>
-                Add Habit
-              </button>
-            </div>
-          </div>
+          </Field>
         </section>
 
-        <section className="sheet">
-          <SectionTitle text="Reflection & Review" emoji="✍️" />
+        <section className="card">
+          <SectionHeader eyebrow="Custom" title="Add Habit" />
+          <div className="add-row">
+            <input
+              type="text"
+              placeholder="Example: Evening walk"
+              value={newHabit}
+              onChange={(event) => setNewHabit(event.target.value)}
+            />
+            <IconButton label="Add habit" icon={Plus} className="primary-icon" onClick={handleAddHabit} />
+          </div>
+        </section>
+      </div>
+    );
+  }
 
-          <div className="reflection-grid">
-            <div className="reflection-block">
-              <h3>Today, I am thankful for... Best Moment of the Day</h3>
-              <textarea
-                value={entry.best_moment ?? ""}
-                placeholder="Jo acha hua, jo yaad rakhna hai, sab yahan likh sakte hain..."
-                onChange={(event) => persist({ best_moment: event.target.value }, { immediate: false })}
-              />
-            </div>
+  function renderReflectTab() {
+    return (
+      <div className="screen-stack">
+        <section className="card">
+          <SectionHeader eyebrow="Reflect" title="Mood & Rating" />
+          <MoodSelector value={entry.mood_key ?? ""} onPick={(value) => persist({ mood_key: value })} />
+          <Field label="Day rating">
+            <DayRatingSelector value={entry.day_rating ?? 0} onPick={(value) => persist({ day_rating: value })} />
+          </Field>
+        </section>
 
-            <div className="reflection-block">
-              <h3>What could be improved today?</h3>
-              <textarea
-                value={entry.improved_today ?? ""}
-                placeholder="Aaj kya behtar ho sakta tha?"
-                onChange={(event) =>
-                  persist({ improved_today: event.target.value }, { immediate: false })
-                }
-              />
-            </div>
+        <section className="card">
+          <SectionHeader eyebrow="Journal" title="Daily Notes" />
+          <Field label="Best moment">
+            <textarea
+              value={entry.best_moment ?? ""}
+              placeholder="What went well today?"
+              onChange={(event) => persist({ best_moment: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Could improve">
+            <textarea
+              value={entry.improved_today ?? ""}
+              placeholder="What could be better?"
+              onChange={(event) => persist({ improved_today: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Gratitude">
+            <textarea
+              value={entry.gratitude ?? ""}
+              placeholder="What are you thankful for?"
+              onChange={(event) => persist({ gratitude: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Review">
+            <textarea
+              value={entry.review ?? ""}
+              placeholder="Short review of the day"
+              onChange={(event) => persist({ review: event.target.value }, { immediate: false })}
+            />
+          </Field>
+        </section>
 
-            <div className="reflection-block">
-              <h3>Gratitude Check</h3>
-              <textarea
-                value={entry.gratitude ?? ""}
-                placeholder="Jitna chahein utna likhein..."
-                onChange={(event) => persist({ gratitude: event.target.value }, { immediate: false })}
-              />
-            </div>
+        <section className="card">
+          <SectionHeader eyebrow="Tomorrow" title="Next Focus" />
+          <Field label="Goals achieved">
+            <textarea
+              value={entry.goals_achieved ?? ""}
+              placeholder="What did you complete?"
+              onChange={(event) => persist({ goals_achieved: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Still working on">
+            <textarea
+              value={entry.still_working_on ?? ""}
+              placeholder="What is still active?"
+              onChange={(event) => persist({ still_working_on: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Focus for tomorrow">
+            <textarea
+              value={entry.focus_for_tomorrow ?? ""}
+              placeholder="Tomorrow's main focus"
+              onChange={(event) => persist({ focus_for_tomorrow: event.target.value }, { immediate: false })}
+            />
+          </Field>
+          <Field label="Intentions">
+            <textarea
+              value={entry.intentions_for_tomorrow ?? ""}
+              placeholder="How do you want to show up tomorrow?"
+              onChange={(event) => persist({ intentions_for_tomorrow: event.target.value }, { immediate: false })}
+            />
+          </Field>
+        </section>
+      </div>
+    );
+  }
 
-            <div className="reflection-block">
-              <h3>Review</h3>
-              <textarea
-                value={entry.review ?? ""}
-                placeholder="Aaj ke din ka review..."
-                onChange={(event) => persist({ review: event.target.value }, { immediate: false })}
-              />
-            </div>
+  function renderAuthCard() {
+    return (
+      <form className="card auth-card" onSubmit={handleAuthSubmit}>
+        <SectionHeader eyebrow="Account" title={authMode === "signin" ? "Sign In" : "Create Account"} />
+        <p className="helper-text">{copy.authIntro}</p>
+        <SegmentedControl
+          value={authMode}
+          onChange={setAuthMode}
+          options={[
+            { value: "signin", label: "Login" },
+            { value: "signup", label: "Create" }
+          ]}
+        />
+        <Field label="Email">
+          <input
+            type="email"
+            required
+            value={authForm.email}
+            onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+          />
+        </Field>
+        <Field label="Password">
+          <input
+            type="password"
+            required
+            value={authForm.password}
+            onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+          />
+        </Field>
+        <button type="submit" className="primary-button">
+          {authMode === "signin" ? "Sign in" : "Create account"}
+        </button>
+      </form>
+    );
+  }
 
-            <div className="info-card-grid">
-              <div className="info-card">
-                <h3>Goals Achieved</h3>
-                <textarea
-                  value={entry.goals_achieved ?? ""}
-                  placeholder="Kya complete hua?"
-                  onChange={(event) =>
-                    persist({ goals_achieved: event.target.value }, { immediate: false })
-                  }
-                />
-              </div>
+  function renderSettingsPanel() {
+    return (
+      <div className="screen-stack">
+        <section className="card">
+          <SectionHeader eyebrow="Settings" title="App Preferences" />
+          <Field label="Language mode">
+            <SegmentedControl
+              value={settings.languageMode}
+              onChange={(value) => {
+                setSettings((current) => ({ ...current, languageMode: value }));
+                setFeedback({ type: "success", message: HELP_TEXT[value]?.settingsSaved ?? HELP_TEXT.mixed.settingsSaved });
+              }}
+              options={[
+                { value: "mixed", label: "Mixed" },
+                { value: "english", label: "English" }
+              ]}
+            />
+          </Field>
+          <Field label="Today focus">
+            <SegmentedControl
+              value={settings.todayFocus}
+              onChange={(value) => {
+                setSettings((current) => ({ ...current, todayFocus: value }));
+                setFeedback({ type: "success", message: copy.settingsSaved });
+              }}
+              options={[
+                { value: "habits", label: "Habits" },
+                { value: "prayer", label: "Prayer" },
+                { value: "moodSleep", label: "Mood" }
+              ]}
+            />
+          </Field>
+        </section>
 
-              <div className="info-card">
-                <h3>Still Working On</h3>
-                <textarea
-                  value={entry.still_working_on ?? ""}
-                  placeholder="Kis cheez par kaam jari hai?"
-                  onChange={(event) =>
-                    persist({ still_working_on: event.target.value }, { immediate: false })
-                  }
-                />
-              </div>
-
-              <div className="info-card">
-                <h3>Focus for Tomorrow</h3>
-                <textarea
-                  value={entry.focus_for_tomorrow ?? ""}
-                  placeholder="Kal ka main focus..."
-                  onChange={(event) =>
-                    persist({ focus_for_tomorrow: event.target.value }, { immediate: false })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="split-grid">
-              <div className="reflection-block">
-                <h3>Mood Tracker</h3>
-                <MoodSelector value={entry.mood_key ?? ""} onPick={(value) => persist({ mood_key: value })} />
-
-                <div className="section-divider" />
-
-                <h3>Day Rating</h3>
-                <div className="star-row">
-                  {DAY_RATING_STARS.map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      className={cx("star-chip", entry.day_rating === star && "active")}
-                      onClick={() => persist({ day_rating: star })}
-                    >
-                      {"★".repeat(star)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="reflection-block">
-                <h3>Intentions for Tomorrow</h3>
-                <textarea
-                  value={entry.intentions_for_tomorrow ?? ""}
-                  placeholder="Kal kis niyyat ke saath start karna hai?"
-                  onChange={(event) =>
-                    persist({ intentions_for_tomorrow: event.target.value }, { immediate: false })
-                  }
-                />
-              </div>
+        <section className="card">
+          <SectionHeader eyebrow="System" title="Connection" />
+          <div className="profile-row">
+            <ShieldCheck size={20} />
+            <div>
+              <strong>{hasSupabaseConfig ? "Supabase connected" : "Environment pending"}</strong>
+              <span>{session?.user ? copy.account : copy.preview}</span>
             </div>
           </div>
-
-          <p className="footer-note">
-            Is app ko env variables ke zariye Supabase se connect kiya jata hai. Agar env abhi set
-            na ho to app placeholder mode mein load hogi.
-          </p>
+          <button type="button" className="secondary-button" onClick={() => load(date)}>
+            <RefreshCw size={18} />
+            Refresh data
+          </button>
         </section>
+      </div>
+    );
+  }
+
+  function renderMorePanel() {
+    return (
+      <div className="screen-stack">
+        <div className="more-header">
+          <IconButton label="Back to profile" icon={ArrowLeft} onClick={() => setProfileView("home")} />
+          <div>
+            <p className="eyebrow">More</p>
+            <h1>{morePanel === "settings" ? "Settings" : morePanel === "reminders" ? "Reminders" : "Security"}</h1>
+          </div>
+        </div>
+
+        <SegmentedControl
+          value={morePanel}
+          onChange={setMorePanel}
+          options={[
+            { value: "settings", label: "Settings" },
+            { value: "reminders", label: "Reminders" },
+            { value: "security", label: "Security" }
+          ]}
+        />
+
+        {morePanel === "settings" ? renderSettingsPanel() : null}
+        {morePanel === "reminders" ? (
+          <ReminderCenter embedded setFeedback={setFeedback} onHabitsChange={setHabits} />
+        ) : null}
+        {morePanel === "security" ? (
+          session?.user ? (
+            <section className="card">
+              <SecurityPanel setFeedback={setFeedback} />
+            </section>
+          ) : (
+            <section className="card empty-state">{copy.noSecurity}</section>
+          )
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderProfileTab() {
+    if (profileView === "more") {
+      return renderMorePanel();
+    }
+
+    return (
+      <div className="screen-stack">
+        <section className="card profile-card">
+          <div className="avatar-circle">
+            <User size={28} />
+          </div>
+          <div>
+            <p className="eyebrow">Profile</p>
+            <h1>{session?.user ? "Account Mode" : "Preview Mode"}</h1>
+            <p className="helper-text">{session?.user ? copy.account : copy.preview}</p>
+          </div>
+          {session?.user ? (
+            <button type="button" className="secondary-button" onClick={handleLogout}>
+              <LogOut size={18} />
+              Logout
+            </button>
+          ) : null}
+        </section>
+
+        {!session?.user ? renderAuthCard() : null}
+
+        <section className="card">
+          <SectionHeader eyebrow="Customize" title="Quick Settings" />
+          <div className="settings-preview">
+            <button type="button" onClick={() => openMore("settings")}>
+              <Settings size={20} />
+              <span>
+                <strong>Language & Today focus</strong>
+                <small>{settings.languageMode === "english" ? "English only" : "Mixed mode"} · {settings.todayFocus}</small>
+              </span>
+              <ChevronRight size={18} />
+            </button>
+            <button type="button" onClick={() => openMore("reminders")}>
+              <AlarmClock size={20} />
+              <span>
+                <strong>Reminders</strong>
+                <small>Repeat days, logs, and stats</small>
+              </span>
+              <ChevronRight size={18} />
+            </button>
+            <button type="button" onClick={() => openMore("security")}>
+              <Lock size={20} />
+              <span>
+                <strong>Security Center</strong>
+                <small>MCP tokens and audit logs</small>
+              </span>
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (loading || !entry) {
+    return (
+      <main className="mobile-app-shell loading-shell">
+        <div className="loading-card">
+          <Sparkles size={24} />
+          <span>Loading MeTrack...</span>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mobile-app-shell">
+      <header className="app-topbar">
+        <div>
+          <p className="eyebrow">MeTrack</p>
+          <strong>{activeTab === "today" ? "Today" : activeTab === "reflect" ? "Reflect" : "Profile"}</strong>
+        </div>
+        <div className="topbar-actions">
+          <label className="date-chip">
+            <CalendarDays size={18} />
+            <input type="date" value={date} onChange={(event) => handleDateChange(event.target.value)} />
+          </label>
+          <span className={cx("save-chip", saving && "saving")}>{saving ? "Saving" : "Saved"}</span>
+        </div>
+      </header>
+
+      <div className="weekday-row" aria-label="Weekdays">
+        {WEEKDAY_LABELS.map((label, index) => (
+          <span key={`${label}_${index}`} className={cx("weekday-chip", weekday === index && "active")}>
+            {label}
+          </span>
+        ))}
+      </div>
+
+      {feedback ? (
+        <div className={cx("alert", feedback.type === "error" ? "error" : "success")}>
+          {feedback.message}
+        </div>
+      ) : null}
+
+      <section className="app-content">
+        {activeTab === "today" ? renderTodayTab() : null}
+        {activeTab === "reflect" ? renderReflectTab() : null}
+        {activeTab === "profile" ? renderProfileTab() : null}
       </section>
+
+      <nav className="bottom-tabs" aria-label="Primary navigation">
+        {[
+          { value: "today", label: "Today", icon: Home },
+          { value: "reflect", label: "Reflect", icon: Heart },
+          { value: "profile", label: "Profile", icon: User }
+        ].map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              className={cx(activeTab === tab.value && "active")}
+              onClick={() => setActiveTab(tab.value)}
+            >
+              <Icon size={20} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {reminderEditor ? (
         <ReminderDialog
@@ -1086,6 +1218,7 @@ export default function App() {
           }}
           onSave={handleSaveReminder}
           busy={reminderBusy}
+          copy={copy}
         />
       ) : null}
     </main>

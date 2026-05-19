@@ -40,7 +40,8 @@ function defaultEditor(habit) {
   };
 }
 
-export default function ReminderCenter({ setFeedback }) {
+export default function ReminderCenter({ embedded = false, setFeedback, onHabitsChange }) {
+  const [localFeedback, setLocalFeedback] = useState(null);
   const [habits, setHabits] = useState([]);
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState({ summary: {} });
@@ -49,6 +50,7 @@ export default function ReminderCenter({ setFeedback }) {
   const [tab, setTab] = useState("settings");
 
   const activeCount = useMemo(() => habits.filter((habit) => habit.reminder_enabled).length, [habits]);
+  const notify = setFeedback ?? setLocalFeedback;
 
   async function refresh() {
     const [nextHabits, nextLogs, nextStats] = await Promise.all([
@@ -57,12 +59,13 @@ export default function ReminderCenter({ setFeedback }) {
       getReminderStats(14)
     ]);
     setHabits(nextHabits);
+    onHabitsChange?.(nextHabits);
     setLogs(nextLogs);
     setStats(nextStats);
   }
 
   useEffect(() => {
-    refresh().catch((error) => setFeedback?.({ type: "error", message: error.message }));
+    refresh().catch((error) => notify({ type: "error", message: error.message }));
   }, []);
 
   function toggleDay(day) {
@@ -86,7 +89,7 @@ export default function ReminderCenter({ setFeedback }) {
   async function saveReminder() {
     if (!editor) return;
     if (editor.reminder_enabled && !editor.reminder_time) {
-      setFeedback?.({ type: "error", message: "Reminder enable karne ke liye time zaroori hai." });
+      notify({ type: "error", message: "Reminder enable karne ke liye time zaroori hai." });
       return;
     }
 
@@ -110,18 +113,24 @@ export default function ReminderCenter({ setFeedback }) {
       setHabits(nextHabits);
       await syncHabitReminderNotifications(nextHabits);
       setEditor(null);
-      setFeedback?.({ type: "success", message: "Repeat-day reminder save ho gaya." });
+      notify({ type: "success", message: "Repeat-day reminder save ho gaya." });
       await refresh();
     } catch (error) {
-      setFeedback?.({ type: "error", message: error.message });
+      notify({ type: "error", message: error.message });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="app-shell reminder-center-shell">
-      <div className="hero-panel reminder-center-panel">
+    <section className={cx(!embedded && "app-shell", "reminder-center-shell", embedded && "embedded")}>
+      <div className="card reminder-center-panel">
+        {localFeedback ? (
+          <div className={cx("alert", localFeedback.type === "error" ? "error" : "success")}>
+            {localFeedback.message}
+          </div>
+        ) : null}
+
         <div className="reminder-center-header">
           <div>
             <p className="eyebrow">Reminders</p>
