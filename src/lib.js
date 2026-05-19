@@ -1,13 +1,18 @@
 export function slugifyHabitName(value) {
-  return value
+  const slug = value
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+
+  return slug || `habit-${Date.now().toString(36)}`;
 }
 
 export function formatDateInput(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function weekdayFromDate(dateText) {
@@ -68,5 +73,45 @@ export function hashToInt(value) {
     hash = (hash * 31 + value.charCodeAt(index)) | 0;
   }
 
-  return Math.abs(hash) || 1;
+  return (Math.abs(hash) % 2147483647) || 1;
+}
+
+export function normalizeRepeatDays(days) {
+  const fallback = [0, 1, 2, 3, 4, 5, 6];
+  if (!Array.isArray(days) || !days.length) return fallback;
+
+  const normalized = [
+    ...new Set(days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))
+  ].sort((a, b) => a - b);
+
+  return normalized.length ? normalized : fallback;
+}
+
+export function getNextDateForRepeatDays(timeText, repeatDays, offsetMinutes = 0) {
+  const [hourText, minuteText] = String(timeText || "").split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return null;
+  }
+
+  if (offsetMinutes > 0) {
+    return new Date(Date.now() + offsetMinutes * 60 * 1000);
+  }
+
+  const allowedDays = normalizeRepeatDays(repeatDays);
+  const now = new Date();
+
+  for (let offset = 0; offset < 8; offset += 1) {
+    const candidate = new Date();
+    candidate.setDate(now.getDate() + offset);
+    candidate.setHours(hour, minute, 0, 0);
+
+    if (candidate.getTime() > now.getTime() && allowedDays.includes(candidate.getDay())) {
+      return candidate;
+    }
+  }
+
+  return null;
 }

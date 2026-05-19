@@ -1,5 +1,12 @@
 import { Capacitor } from "@capacitor/core";
-import { formatDateInput, formatTimeLabel, hashToInt } from "./lib.js";
+import {
+  formatDateInput,
+  formatTimeLabel,
+  getNextDateForRepeatDays,
+  hashToInt,
+  normalizeRepeatDays
+} from "./lib.js";
+import { logReminderAction } from "./reminderApi.js";
 
 const ACTION_TYPE_ID = "habit-reminder-actions";
 const ACTION_YES = "habit_yes";
@@ -36,8 +43,15 @@ function buildReminderBody(habit) {
   return `Kya aap ne ${habit.name} complete kar li hai?`;
 }
 
-function getReminderId(habitId) {
-  return hashToInt(`habit-reminder:${habitId}`);
+function getReminderId(habitId, day = "daily") {
+  return hashToInt(`habit-reminder:${habitId}:${day}`);
+}
+
+function getReminderIds(habit) {
+  return normalizeRepeatDays(habit.reminder_repeat_days).map((day) => ({
+    id: getReminderId(habit.id, day),
+    day
+  }));
 }
 
 function getLaterReminderId(habitId, dateText) {
@@ -50,30 +64,6 @@ function clearWebReminder(habitId) {
     window.clearTimeout(timer);
     webReminderTimers.delete(habitId);
   }
-}
-
-function getNextReminderDate(timeText, offsetMinutes = 0) {
-  const [hourText, minuteText] = String(timeText || "").split(":");
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-
-  if (Number.isNaN(hour) || Number.isNaN(minute)) {
-    return null;
-  }
-
-  const now = new Date();
-  const next = new Date();
-  next.setHours(hour, minute, 0, 0);
-
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
-  }
-
-  if (offsetMinutes > 0) {
-    next.setTime(Date.now() + offsetMinutes * 60 * 1000);
-  }
-
-  return next;
 }
 
 async function ensureNativeNotificationsReady() {
@@ -147,7 +137,7 @@ function scheduleWebReminder(habit, onNotify) {
     return;
   }
 
-  const next = getNextReminderDate(habit.reminder_time);
+  const next = getNextDateForRepeatDays(habit.reminder_time, habit.reminder_repeat_days);
   if (!next) {
     return;
   }
@@ -167,6 +157,14 @@ function scheduleWebReminder(habit, onNotify) {
         habitName: habit.name
       });
     }
+
+    logReminderAction({
+      habitId: habit.id,
+      entryDate: formatDateInput(),
+      scheduledFor: next.toISOString(),
+      action: "fired",
+      source: "web"
+    });
 
     scheduleWebReminder(habit, onNotify);
   }, delay);
@@ -210,7 +208,7 @@ export async function syncHabitReminderNotifications(habits, options = {}) {
     }
 
     const idsToClear = habits.flatMap((habit) => [
-      { id: getReminderId(habit.id) },
+      ...getReminderIds(habit).map(({ id }) => ({ id })),
       { id: getLaterReminderId(habit.id, formatDateInput()) }
     ]);
 
@@ -225,31 +223,53 @@ export async function syncHabitReminderNotifications(habits, options = {}) {
       return ready;
     }
 
-    await LocalNotifications.schedule({
-      notifications: activeHabits.map((habit) => {
+    const notifications = activeHabits.flatMap((habit) => {
         const [hourText, minuteText] = String(habit.reminder_time).split(":");
-        return {
-          id: getReminderId(habit.id),
+        const hour = Number(hourText);
+        const minute = Number(minuteText);
+
+        return getReminderIds(habit).map(({ id, day }) => ({
+          id,
           title: `Reminder: ${habit.name}`,
           body: buildReminderBody(habit),
           actionTypeId: ACTION_TYPE_ID,
           channelId: REMINDER_CHANNEL_ID,
           schedule: {
             on: {
-              hour: Number(hourText),
-              minute: Number(minuteText)
+              weekday: day === 0 ? 1 : day + 1,
+              hour,
+              minute
             },
+            repeats: true,
             allowWhileIdle: true
           },
           extra: {
             kind: "habit-reminder",
             habitId: habit.id,
             habitName: habit.name,
+            reminderDay: day,
             snoozeMinutes: Number(habit.reminder_snooze_minutes || 30)
           }
-        };
-      })
+        }));
+      });
+
+    await LocalNotifications.schedule({
+      notifications
     });
+
+    await Promise.all(
+      activeHabits.map((habit) => {
+        const scheduledFor = getNextDateForRepeatDays(habit.reminder_time, habit.reminder_repeat_days);
+        return logReminderAction({
+          habitId: habit.id,
+          entryDate: formatDateInput(scheduledFor ?? new Date()),
+          scheduledFor: scheduledFor?.toISOString(),
+          action: "scheduled",
+          source: "android",
+          detail: { repeat_days: normalizeRepeatDays(habit.reminder_repeat_days) }
+        });
+      })
+    );
 
     return { available: true, permission: ready.permission };
   }
@@ -269,6 +289,7 @@ export async function scheduleLaterReminder(habit, minutes) {
     }
 
     const LocalNotifications = await getLocalNotifications();
+    const scheduledFor = getNextDateForRepeatDays(habit.reminder_time, habit.reminder_repeat_days, delayMinutes);
     await LocalNotifications.schedule({
       notifications: [
         {
@@ -278,7 +299,7 @@ export async function scheduleLaterReminder(habit, minutes) {
           actionTypeId: ACTION_TYPE_ID,
           channelId: REMINDER_CHANNEL_ID,
           schedule: {
-            at: new Date(Date.now() + delayMinutes * 60 * 1000),
+            at: scheduledFor,
             allowWhileIdle: true
           },
           extra: {
@@ -289,6 +310,14 @@ export async function scheduleLaterReminder(habit, minutes) {
           }
         }
       ]
+    });
+    await logReminderAction({
+      habitId: habit.id,
+      entryDate: formatDateInput(scheduledFor),
+      scheduledFor: scheduledFor.toISOString(),
+      action: "later",
+      source: "android",
+      snoozeMinutes: delayMinutes
     });
     return { available: true, permission: ready.permission };
   }
@@ -310,7 +339,7 @@ export async function clearHabitReminderNotifications(habitId) {
 
   await LocalNotifications.cancel({
     notifications: [
-      { id: getReminderId(habitId) },
+      ...normalizeRepeatDays().map((day) => ({ id: getReminderId(habitId, day) })),
       { id: getLaterReminderId(habitId, formatDateInput()) }
     ]
   }).catch(() => {});
@@ -342,6 +371,23 @@ export async function registerReminderActionListener(onAction) {
       entryDate: formatDateInput(),
       source: extra.kind
     });
+
+    const actionMap = {
+      [ACTION_YES]: "yes",
+      [ACTION_NO]: "no",
+      [ACTION_LATER]: "later"
+    };
+
+    if (actionMap[event.actionId]) {
+      logReminderAction({
+        habitId: extra.habitId,
+        entryDate: formatDateInput(),
+        action: actionMap[event.actionId],
+        source: "android",
+        snoozeMinutes: Number(extra.snoozeMinutes || 30),
+        detail: { notification_kind: extra.kind }
+      });
+    }
   });
 
   actionListenerBound = true;
@@ -373,7 +419,9 @@ export function describeReminder(habit) {
     return "Reminder off";
   }
 
-  return `Daily at ${formatTimeLabel(habit.reminder_time)}`;
+  const repeatDays = normalizeRepeatDays(habit.reminder_repeat_days);
+  const dayLabel = repeatDays.length === 7 ? "Daily" : `${repeatDays.length} days/week`;
+  return `${dayLabel} at ${formatTimeLabel(habit.reminder_time)}`;
 }
 
 export const reminderActionIds = {

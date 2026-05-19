@@ -6,11 +6,18 @@ if (!existsSync(manifestPath)) {
   process.exit(0);
 }
 
-const permissionLine =
-  '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />';
+const permissionLines = [
+  '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+  '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />'
+];
 
 const current = readFileSync(manifestPath, "utf8");
-if (current.includes("android.permission.SCHEDULE_EXACT_ALARM")) {
+const missingPermissions = permissionLines.filter((line) => {
+  const match = line.match(/android\.permission\.[A-Z_]+/);
+  return match && !current.includes(match[0]);
+});
+
+if (!missingPermissions.length) {
   process.exit(0);
 }
 
@@ -21,8 +28,8 @@ if (applicationIndex === -1) {
 
 const updated =
   current.slice(0, applicationIndex) +
-  `${permissionLine}\n` +
+  `${missingPermissions.join("\n")}\n` +
   current.slice(applicationIndex);
 
 writeFileSync(manifestPath, updated);
-process.stdout.write("Android exact alarm permission added to manifest.\n");
+process.stdout.write("Android reminder permissions added to manifest.\n");

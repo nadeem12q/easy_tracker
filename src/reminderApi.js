@@ -1,4 +1,5 @@
-import { listHabits } from "./api.js";
+import { listHabits, updateHabitReminder } from "./api.js";
+import { normalizeRepeatDays as normalizeDays } from "./lib.js";
 import { getSupabaseClient, hasSupabaseConfig } from "./supabase.js";
 
 async function getSessionUser() {
@@ -10,10 +11,7 @@ async function getSessionUser() {
 }
 
 export function normalizeRepeatDays(days) {
-  const fallback = [0, 1, 2, 3, 4, 5, 6];
-  if (!Array.isArray(days) || !days.length) return fallback;
-  const normalized = [...new Set(days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
-  return normalized.length ? normalized : fallback;
+  return normalizeDays(days);
 }
 
 export async function listReminderHabits() {
@@ -30,7 +28,7 @@ export async function saveHabitReminderAdvanced(habitId, patch) {
   };
 
   if (!hasSupabaseConfig || !(await getSessionUser())) {
-    throw new Error("Repeat-day reminders save karne ke liye signed-in Supabase account zaroori hai.");
+    return updateHabitReminder(habitId, normalized);
   }
 
   const supabase = await getSupabaseClient();

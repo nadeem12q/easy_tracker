@@ -1,5 +1,5 @@
-import { DEFAULT_HABIT_SEED, DEFAULT_HABITS, MOOD_OPTIONS } from "./defaults.js";
-import { calculateSleepDuration, createLocalId, slugifyHabitName } from "./lib.js";
+import { DEFAULT_HABIT_SEED, MOOD_OPTIONS } from "./defaults.js";
+import { calculateSleepDuration, createLocalId, normalizeRepeatDays, slugifyHabitName } from "./lib.js";
 import { getSupabaseClient, hasSupabaseConfig } from "./supabase.js";
 
 const LOCAL_STORAGE_KEY = "metrack-local-state-v1";
@@ -59,7 +59,8 @@ function buildDefaultHabits() {
     reminder_enabled: false,
     reminder_time: "",
     reminder_message: "",
-    reminder_snooze_minutes: 30
+    reminder_snooze_minutes: 30,
+    reminder_repeat_days: normalizeRepeatDays()
   }));
 }
 
@@ -285,7 +286,8 @@ export async function createHabit(name) {
       reminder_enabled: false,
       reminder_time: "",
       reminder_message: "",
-      reminder_snooze_minutes: 30
+      reminder_snooze_minutes: 30,
+      reminder_repeat_days: normalizeRepeatDays()
     };
     state.habits.push(habit);
     setLocalState(state);
@@ -306,7 +308,8 @@ export async function createHabit(name) {
       reminder_enabled: false,
       reminder_time: null,
       reminder_message: "",
-      reminder_snooze_minutes: 30
+      reminder_snooze_minutes: 30,
+      reminder_repeat_days: normalizeRepeatDays()
     })
     .select("*")
     .single();
@@ -534,7 +537,10 @@ export async function updateHabitReminder(habitId, patch) {
     reminder_enabled: Boolean(patch.reminder_enabled),
     reminder_time: patch.reminder_enabled ? patch.reminder_time || null : null,
     reminder_message: patch.reminder_message ?? "",
-    reminder_snooze_minutes: Number(patch.reminder_snooze_minutes ?? 30)
+    reminder_snooze_minutes: Number(patch.reminder_snooze_minutes ?? 30),
+    ...(patch.reminder_repeat_days
+      ? { reminder_repeat_days: normalizeRepeatDays(patch.reminder_repeat_days) }
+      : {})
   };
 
   if (!hasSupabaseConfig || !(await getRemoteSession())) {
